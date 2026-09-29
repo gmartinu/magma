@@ -1,0 +1,87 @@
+---
+swagger: '2.0'
+
+magma-gen-meta:
+  go-package: magma/acs/cloud/go/services/acs/obsidian/models
+  dependencies:
+    - 'orc8r/cloud/go/models/swagger-common.yml'
+  temp-gen-filename: acs-swagger.yml
+  output-dir: acs/cloud/go/services/acs/obsidian
+  types:
+    - go-struct-name: AcsDevice
+      filename: acs_device_swaggergen.go
+
+info:
+  title: ACS
+  description: TR-069 Auto Configuration Server REST APIs
+  version: 1.0.0
+
+basePath: /magma/v1
+
+tags:
+  - name: ACS
+    description: Endpoints related to TR-069 CPEs managed by the ACS
+
+paths:
+  /acs/{network_id}/devices:
+    get:
+      summary: List the CPEs claimed by the network
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '200':
+          description: CPEs claimed by the network
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/acs_device'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+definitions:
+  acs_device:
+    description: A TR-069 CPE known to the ACS
+    type: object
+    x-nullable: false
+    required:
+      - device_id
+      - oui
+      - serial_number
+      - first_seen
+      - last_seen
+    properties:
+      device_id:
+        x-nullable: false
+        description: TR-069 DeviceId as OUI-ProductClass-SerialNumber
+        type: string
+        minLength: 1
+        example: 00259E-Titan4000-ABC123456
+      oui:
+        x-nullable: false
+        type: string
+        example: 00259E
+      product_class:
+        type: string
+        example: Titan4000
+      serial_number:
+        x-nullable: false
+        type: string
+        example: ABC123456
+      model:
+        type: string
+      firmware:
+        description: Software version reported by the CPE
+        type: string
+      handler:
+        description: Model handler the ACS uses for this CPE
+        type: string
+      first_seen:
+        x-nullable: false
+        type: string
+        format: date-time
+      last_seen:
+        x-nullable: false
+        type: string
+        format: date-time
