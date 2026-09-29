@@ -66,7 +66,7 @@ RUN curl -Lfs https://github.com/protocolbuffers/protobuf/releases/download/v3.1
 # ------------------------------------------------------------------------------
 FROM base AS gocache
 
-ARG MAGMA_MODULES="orc8r lte feg cwf dp"
+ARG MAGMA_MODULES="orc8r lte feg cwf dp acs"
 RUN echo "export GOCACHE_MODULES=\"$(for m in $MAGMA_MODULES ; do echo -n /gomod/src/magma/$m ; echo -n ' ' ; done)\"" >> /etc/profile.d/env.sh
 
 COPY gomod /gomod
@@ -78,7 +78,7 @@ RUN . /etc/profile.d/env.sh && for m in $GOCACHE_MODULES ; do cd ${m}/cloud/go &
 # ------------------------------------------------------------------------------
 FROM gocache AS src
 
-ARG MAGMA_MODULES="orc8r lte feg cwf dp"
+ARG MAGMA_MODULES="orc8r lte feg cwf dp acs"
 RUN echo "export MAGMA_MODULES=\"$(for m in $MAGMA_MODULES ; do echo -n /src/magma/$m ; echo -n ' ' ; done)\"" >> /etc/profile.d/env.sh
 
 # Source code
