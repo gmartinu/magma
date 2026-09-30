@@ -18,6 +18,8 @@ import (
 
 	"magma/acs/cloud/go/acs"
 	acs_service "magma/acs/cloud/go/services/acs"
+	"magma/acs/cloud/go/services/acs/cwmp/server"
+	"magma/acs/cloud/go/services/acs/datamodel"
 	"magma/acs/cloud/go/services/acs/obsidian/handlers"
 	acs_storage "magma/acs/cloud/go/services/acs/storage"
 	"magma/orc8r/cloud/go/service"
@@ -47,7 +49,23 @@ func main() {
 		glog.Fatalf("Error initializing %s storage: %s", acs_service.ServiceName, err)
 	}
 
-	obsidian.AttachHandlers(srv.EchoServer, handlers.NewHandlers(store).GetHandlers())
+	cwmpConfig, err := serviceConfig.ServerConfig()
+	if err != nil {
+		glog.Fatalf("Error in %s config: %s", acs_service.ServiceName, err)
+	}
+	cwmpServer, err := server.New(cwmpConfig, store, datamodel.NewRegistry())
+	if err != nil {
+		glog.Fatalf("Error creating CWMP server: %s", err)
+	}
+	go func() {
+		err := cwmpServer.HTTPServer(serviceConfig.CwmpPort).ListenAndServe()
+		glog.Fatalf("CWMP listener on port %d stopped: %s", serviceConfig.CwmpPort, err)
+	}()
+	go cwmpServer.RunMaintenance(make(chan struct{}), serviceConfig.MaintenanceInterval())
+
+	restHandlers := handlers.NewHandlers(store)
+	restHandlers.TaskMaxAttempts, restHandlers.TaskTTL = serviceConfig.TaskDefaults()
+	obsidian.AttachHandlers(srv.EchoServer, restHandlers.GetHandlers())
 	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(acs_service.ServiceName))
 
 	err = srv.Run()
