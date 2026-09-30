@@ -13,6 +13,16 @@ limitations under the License.
 
 package storage
 
+import "errors"
+
+var (
+	// ErrDeviceNotFound is returned for a device the ACS does not know.
+	ErrDeviceNotFound = errors.New("device not found")
+	// ErrDeviceClaimed is returned when claiming a device a network already
+	// claimed.
+	ErrDeviceClaimed = errors.New("device already claimed")
+)
+
 // Device is a CPE known to the ACS.
 type Device struct {
 	// DeviceID is the TR-069 DeviceId triplet, OUI-ProductClass-SerialNumber.
@@ -27,7 +37,78 @@ type Device struct {
 	Handler              string
 	ConnectionRequestURL string
 	FirstSeenSec         int64
-	LastSeenSec          int64
+	// LastSeenSec is when the device last sent an Inform.
+	LastSeenSec int64
+	// InformIntervalSec is the PeriodicInformInterval the device last
+	// reported, 0 while unknown.
+	InformIntervalSec int64
+	// LastInformEvents are the event codes of the last Inform.
+	LastInformEvents []string
+}
+
+// OnlinePolicy decides whether a device is online: it is while its last
+// Inform is at most IntervalMultiple periodic inform intervals old.
+type OnlinePolicy struct {
+	IntervalMultiple float64
+	// DefaultIntervalSec stands in for the interval of devices that have not
+	// reported one.
+	DefaultIntervalSec int64
+}
+
+// DefaultOnlinePolicy allows one missed periodic Inform.
+var DefaultOnlinePolicy = OnlinePolicy{IntervalMultiple: 2, DefaultIntervalSec: 3600}
+
+// multipleMilli is IntervalMultiple in thousandths, so the SQL filter stays in
+// integers on every dialect.
+func (p OnlinePolicy) multipleMilli() int64 {
+	if p.IntervalMultiple <= 0 {
+		return int64(DefaultOnlinePolicy.IntervalMultiple * 1000)
+	}
+	return int64(p.IntervalMultiple * 1000)
+}
+
+func (p OnlinePolicy) defaultInterval() int64 {
+	if p.DefaultIntervalSec <= 0 {
+		return DefaultOnlinePolicy.DefaultIntervalSec
+	}
+	return p.DefaultIntervalSec
+}
+
+// Online reports whether the device is online at nowSec.
+func (p OnlinePolicy) Online(d *Device, nowSec int64) bool {
+	interval := d.InformIntervalSec
+	if interval <= 0 {
+		interval = p.defaultInterval()
+	}
+	return (nowSec-d.LastSeenSec)*1000 <= p.multipleMilli()*interval
+}
+
+// DeviceFilter selects devices. Either NetworkID or Unclaimed must be set.
+type DeviceFilter struct {
+	// NetworkID selects the devices claimed by the network.
+	NetworkID string
+	// Unclaimed selects the devices no network has claimed.
+	Unclaimed bool
+	// Model, when set, must equal the model name exactly.
+	Model string
+	// Online, when set, keeps the devices whose online state under Policy
+	// at NowSec matches it.
+	Online *bool
+	Policy OnlinePolicy
+	NowSec int64
+}
+
+// ParameterValue is the last value read of a raw TR-069 parameter.
+type ParameterValue struct {
+	Value      string `json:"value"`
+	UpdatedSec int64  `json:"updated_sec"`
+}
+
+// Parameters are the raw parameters of a device, as last read from it.
+type Parameters struct {
+	DeviceID   string
+	Values     map[string]ParameterValue
+	UpdatedSec int64
 }
 
 // Credentials are the per-CPE secrets for both directions of TR-069 auth.
@@ -142,6 +223,11 @@ type ACSStorage interface {
 	GetDevice(deviceID string) (*Device, error)
 	// ListDevices returns the devices claimed by a network, ordered by ID.
 	ListDevices(networkID string) ([]*Device, error)
+	// FindDevices returns the devices matching the filter, ordered by ID.
+	FindDevices(filter DeviceFilter) ([]*Device, error)
+	// ClaimDevice assigns an unclaimed device to a network. It returns
+	// ErrDeviceNotFound or ErrDeviceClaimed when it cannot.
+	ClaimDevice(deviceID, networkID string) error
 
 	// PutCredentials creates or replaces the credentials of a device.
 	PutCredentials(creds *Credentials) error
@@ -193,6 +279,12 @@ type ACSStorage interface {
 	PutDeviceState(state *DeviceState) error
 	// GetDeviceState returns the normalized model of a device, or nil.
 	GetDeviceState(deviceID string) (*DeviceState, error)
+
+	// MergeParameters records raw parameter values read from a device over
+	// the ones stored, keeping the parameters it did not read.
+	MergeParameters(deviceID string, values map[string]string, nowSec int64) error
+	// GetParameters returns the raw parameters of a device, or nil.
+	GetParameters(deviceID string) (*Parameters, error)
 
 	// GetOrCreateSecret returns the named secret shared by every replica,
 	// creating it with generate on first use.
