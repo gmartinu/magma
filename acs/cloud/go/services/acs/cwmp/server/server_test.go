@@ -29,6 +29,89 @@ import (
 	"magma/acs/cloud/go/services/acs/tasks"
 )
 
+func TestBootstrapRotationAndPeriodic(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+
+	s := runSession(t, cpe, cwmp.EventBootstrap, cwmp.EventBoot)
+	require.Equal(t, []string{"SetParameterValues"}, methods(s))
+	spv := s.Requests[0].(*cwmp.SetParameterValues)
+	values := spv.ParameterList.Map()
+	assert.Equal(t, h.deviceID(), values["Device.ManagementServer.Username"])
+	assert.Len(t, values["Device.ManagementServer.Password"], datamodel.DefaultPasswordLength)
+	assert.Equal(t, h.deviceID(), values["Device.ManagementServer.ConnectionRequestUsername"])
+	assert.Equal(t, h.deviceID(), cpe.Username)
+	assert.NotEqual(t, bootstrapPass, cpe.Password)
+
+	creds, err := h.store.GetCredentials(h.deviceID())
+	require.NoError(t, err)
+	assert.Equal(t, auth.HashPassword(h.deviceID(), "magma-acs", cpe.Password), creds.ACSPasswordHash)
+	assert.Empty(t, creds.PendingPasswordHash)
+	assert.NotContains(t, creds.ACSPasswordHash, cpe.Password)
+
+	device, err := h.store.GetDevice(h.deviceID())
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0-sim", device.Firmware)
+	assert.Equal(t, datamodel.GenericHandlerName, device.Handler)
+	assert.Equal(t, "http://192.0.2.10:7548/cr", device.ConnectionRequestURL)
+	assert.Equal(t, datamodel.RootTR181, h.model().Root)
+
+	// With its own credentials the CPE has nothing more to do.
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Empty(t, s.Requests)
+
+	// The bootstrap credentials no longer work for this device.
+	impostor := h.cpe(datamodel.RootTR181)
+	s, err = impostor.RunSession(cwmp.EventPeriodic)
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, s.Status)
+
+	// A wrong bootstrap password is refused for an unknown device too.
+	other := h.cpe(datamodel.RootTR181)
+	other.DeviceID.SerialNumber = "SIM0002"
+	other.Password = "wrong"
+	s, err = other.RunSession(cwmp.EventBootstrap)
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, s.Status)
+
+	sess, err := h.store.GetDeviceSession(h.deviceID())
+	require.NoError(t, err)
+	assert.Nil(t, sess, "sessions end with the 204")
+}
+
+func TestRotationAnswerLost(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+	cpe.ApplyAndDrop = "SetParameterValues"
+	_, err := cpe.RunSession(cwmp.EventBootstrap)
+	require.NoError(t, err)
+	creds, _ := h.store.GetCredentials(h.deviceID())
+	assert.Empty(t, creds.ACSPasswordHash)
+	assert.NotEmpty(t, creds.PendingPasswordHash)
+
+	// The CPE applied the new password: the ACS accepts it and promotes it.
+	cpe.ApplyAndDrop = ""
+	s := runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Empty(t, s.Requests)
+	creds, _ = h.store.GetCredentials(h.deviceID())
+	assert.Equal(t, auth.HashPassword(h.deviceID(), "magma-acs", cpe.Password), creds.ACSPasswordHash)
+	assert.Empty(t, creds.PendingPasswordHash)
+}
+
+func TestRotationRefused(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR098)
+	cpe.Faults["SetParameterValues"] = cwmp.NewFault(cwmp.FaultCPENonWritableParam, "read only")
+	s := runSession(t, cpe, cwmp.EventBootstrap)
+	require.Equal(t, []string{"SetParameterValues"}, methods(s))
+	assert.Equal(t, "InternetGatewayDevice.ManagementServer.Password", s.Requests[0].(*cwmp.SetParameterValues).ParameterList[1].Name)
+	creds, _ := h.store.GetCredentials(h.deviceID())
+	assert.Empty(t, creds.PendingPasswordHash)
+	// Still on bootstrap credentials, so the ACS tries again next session.
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{"SetParameterValues"}, methods(s))
+}
+
 func TestNewInformEndsOpenSession(t *testing.T) {
 	h := newHarness(t, defaultConfig(), 1)
 	cpe := h.cpe(datamodel.RootTR181)
@@ -45,6 +128,21 @@ func TestNewInformEndsOpenSession(t *testing.T) {
 	s := runSession(t, cpe)
 	assert.Equal(t, []string{"Reboot"}, methods(s))
 	assert.Equal(t, storage.TaskDone, h.task(reboot).Status)
+}
+
+func TestFactoryResetReturnsToBootstrap(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+	runSession(t, cpe, cwmp.EventBootstrap)
+	id := h.queue(tasks.TypeFactoryReset, tasks.Args{}, 1)
+	s := runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{"FactoryReset"}, methods(s))
+	assert.Equal(t, storage.TaskDone, h.task(id).Status)
+	assert.Equal(t, bootstrapUser, cpe.Username)
+
+	s = runSession(t, cpe)
+	assert.Equal(t, []string{"SetParameterValues"}, methods(s), "rotated again after the reset")
+	assert.Equal(t, h.deviceID(), cpe.Username)
 }
 
 func TestCookielessCPE(t *testing.T) {
