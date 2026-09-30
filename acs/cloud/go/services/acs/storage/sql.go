@@ -101,11 +101,25 @@ var credentialsCols = []string{
 type sqlACSStorage struct {
 	db      *sql.DB
 	builder sqorc.StatementBuilder
+	sealer  *Sealer
+}
+
+// Option configures the SQL storage.
+type Option func(*sqlACSStorage)
+
+// WithSealer encrypts the ConnectionRequest password at rest. Without it the
+// storage refuses to store or read one.
+func WithSealer(s *Sealer) Option {
+	return func(st *sqlACSStorage) { st.sealer = s }
 }
 
 // NewSQLACSStorage returns an ACSStorage backed by the Orc8r SQL database.
-func NewSQLACSStorage(db *sql.DB, builder sqorc.StatementBuilder) ACSStorage {
-	return &sqlACSStorage{db: db, builder: builder}
+func NewSQLACSStorage(db *sql.DB, builder sqorc.StatementBuilder, opts ...Option) ACSStorage {
+	s := &sqlACSStorage{db: db, builder: builder}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *sqlACSStorage) Init() error {
@@ -338,17 +352,21 @@ func (s *sqlACSStorage) selectDevices(where sq.Sqlizer) ([]*Device, error) {
 }
 
 func (s *sqlACSStorage) PutCredentials(c *Credentials) error {
+	sealedCRPassword, err := sealSecret(s.sealer, c.ConnReqPassword, c.DeviceID)
+	if err != nil {
+		return fmt.Errorf("put credentials for %s: %w", c.DeviceID, err)
+	}
 	txFn := func(tx *sql.Tx) (interface{}, error) {
 		_, err := s.builder.Insert(credentialsTable).
 			Columns(credentialsCols...).
-			Values(c.DeviceID, c.ACSUsername, c.ACSPasswordHash, c.PendingPasswordHash, c.ConnReqUsername, c.ConnReqPassword, c.UpdatedSec).
+			Values(c.DeviceID, c.ACSUsername, c.ACSPasswordHash, c.PendingPasswordHash, c.ConnReqUsername, sealedCRPassword, c.UpdatedSec).
 			OnConflict(
 				[]sqorc.UpsertValue{
 					{Column: acsUsernameCol, Value: c.ACSUsername},
 					{Column: acsPasswordHashCol, Value: c.ACSPasswordHash},
 					{Column: pendingHashCol, Value: c.PendingPasswordHash},
 					{Column: connReqUsernameCol, Value: c.ConnReqUsername},
-					{Column: connReqPasswordCol, Value: c.ConnReqPassword},
+					{Column: connReqPasswordCol, Value: sealedCRPassword},
 					{Column: updatedCol, Value: c.UpdatedSec},
 				},
 				deviceIDCol,
@@ -360,7 +378,7 @@ func (s *sqlACSStorage) PutCredentials(c *Credentials) error {
 		}
 		return nil, nil
 	}
-	_, err := sqorc.ExecInTx(s.db, nil, nil, txFn)
+	_, err = sqorc.ExecInTx(s.db, nil, nil, txFn)
 	return err
 }
 
@@ -385,6 +403,9 @@ func (s *sqlACSStorage) getCredentials(where sq.Sqlizer) (*Credentials, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get credentials: %w", err)
+	}
+	if c.ConnReqPassword, err = openSecret(s.sealer, c.ConnReqPassword, c.DeviceID); err != nil {
+		return nil, fmt.Errorf("get credentials of %s: %w", c.DeviceID, err)
 	}
 	return c, nil
 }

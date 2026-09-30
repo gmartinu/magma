@@ -44,7 +44,11 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error opening db connection: %s", err)
 	}
-	store := acs_storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder())
+	sealer, err := serviceConfig.Sealer()
+	if err != nil {
+		glog.Fatalf("Error in %s config: %s", acs_service.ServiceName, err)
+	}
+	store := acs_storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder(), acs_storage.WithSealer(sealer))
 	if err := store.Init(); err != nil {
 		glog.Fatalf("Error initializing %s storage: %s", acs_service.ServiceName, err)
 	}

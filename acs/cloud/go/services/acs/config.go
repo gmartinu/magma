@@ -16,11 +16,13 @@ limitations under the License.
 package acs
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"magma/acs/cloud/go/services/acs/auth"
 	"magma/acs/cloud/go/services/acs/cwmp/server"
+	"magma/acs/cloud/go/services/acs/storage"
 )
 
 const ServiceName = "acs"
@@ -30,6 +32,9 @@ const ServiceName = "acs"
 const (
 	BootstrapUsernameEnv = "ACS_BOOTSTRAP_USERNAME"
 	BootstrapPasswordEnv = "ACS_BOOTSTRAP_PASSWORD"
+	// EncryptionKeyEnv holds the base64 32 byte key that seals the
+	// ConnectionRequest passwords at rest. It is env only, never in the file.
+	EncryptionKeyEnv = "ACS_ENCRYPTION_KEY"
 )
 
 type Config struct {
@@ -80,6 +85,24 @@ func (c Config) ServerConfig() (server.Config, error) {
 		cfg.BootstrapPassword = v
 	}
 	return cfg, nil
+}
+
+// Sealer returns the sealer of the key in EncryptionKeyEnv. Without the key
+// it returns nil, which is an error when credentials are rotated: rotation
+// stores a ConnectionRequest password and the storage refuses it unsealed.
+func (c Config) Sealer() (*storage.Sealer, error) {
+	encoded := os.Getenv(EncryptionKeyEnv)
+	if encoded == "" {
+		if c.RotateCredentials == nil || *c.RotateCredentials {
+			return nil, fmt.Errorf("%s is required while rotate_credentials is on", EncryptionKeyEnv)
+		}
+		return nil, nil
+	}
+	key, err := storage.ParseEncryptionKey(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return storage.NewSealer(key)
 }
 
 // MaintenanceInterval is how often expired sessions and tasks are reaped.
