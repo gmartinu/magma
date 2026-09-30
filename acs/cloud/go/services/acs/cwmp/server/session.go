@@ -240,7 +240,18 @@ func (s *Server) finishTask(sess *storage.Session, task *storage.Task, result ta
 	switch task.Type {
 	case tasks.TypeRefresh:
 		h := s.handlers.Get(sess.Handler)
-		if err := s.mergeState(sess.DeviceID, h.Name(), h.Normalize(sess.Root, result.Values), now); err != nil {
+		model := h.Normalize(sess.Root, result.Values)
+		if err := s.mergeState(sess.DeviceID, h.Name(), model, now); err != nil {
+			return err
+		}
+		if err := s.store.MergeParameters(sess.DeviceID, result.Values, now); err != nil {
+			return err
+		}
+		if err := s.refreshDevice(sess.DeviceID, model); err != nil {
+			return err
+		}
+	case tasks.TypeGetParameterValues:
+		if err := s.store.MergeParameters(sess.DeviceID, result.Values, now); err != nil {
 			return err
 		}
 	case tasks.TypeFactoryReset:
@@ -333,4 +344,28 @@ func marshalJSON(v interface{}) (string, error) {
 
 func unmarshalJSON(s string, v interface{}) error {
 	return json.Unmarshal([]byte(s), v)
+}
+
+// refreshDevice copies what a refresh read onto the device record: the model
+// name and firmware its list filters on, which the Inform may not carry, and
+// the periodic inform interval its online state is derived from.
+func (s *Server) refreshDevice(deviceID string, m *datamodel.Model) error {
+	d, err := s.store.GetDevice(deviceID)
+	if err != nil || d == nil {
+		return err
+	}
+	updated := *d
+	if v := m.Identity.ModelName; v != "" {
+		updated.Model = v
+	}
+	if v := m.Firmware.SoftwareVersion; v != "" {
+		updated.Firmware = v
+	}
+	if v := m.ManagementServer.PeriodicInformInterval; v != nil {
+		updated.InformIntervalSec = *v
+	}
+	if updated.Model == d.Model && updated.Firmware == d.Firmware && updated.InformIntervalSec == d.InformIntervalSec {
+		return nil
+	}
+	return s.store.UpsertDevice(&updated)
 }

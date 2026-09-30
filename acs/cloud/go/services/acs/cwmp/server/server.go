@@ -357,7 +357,11 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 	h := s.handlers.Select(info)
 	reported := h.Normalize(root, params)
 
-	if err := s.saveDevice(deviceID, id, h, reported, now); err != nil {
+	if err := s.saveDevice(deviceID, id, inform.Event, h, reported, now); err != nil {
+		s.internalError(req, err)
+		return
+	}
+	if err := s.store.MergeParameters(deviceID, params, now); err != nil {
 		s.internalError(req, err)
 		return
 	}
@@ -408,7 +412,7 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 
 // saveDevice records the device and merges what its Inform reports onto its
 // normalized model.
-func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, h datamodel.Handler, reported *datamodel.Model, now int64) error {
+func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, events cwmp.EventList, h datamodel.Handler, reported *datamodel.Model, now int64) error {
 	prev, err := s.store.GetDevice(deviceID)
 	if err != nil {
 		return err
@@ -422,8 +426,15 @@ func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, h datamodel
 		FirstSeenSec: now,
 		LastSeenSec:  now,
 	}
+	for _, e := range events {
+		d.LastInformEvents = append(d.LastInformEvents, e.EventCode)
+	}
 	if prev != nil {
 		d.Model, d.Firmware, d.ConnectionRequestURL = prev.Model, prev.Firmware, prev.ConnectionRequestURL
+		d.InformIntervalSec = prev.InformIntervalSec
+	}
+	if v := reported.ManagementServer.PeriodicInformInterval; v != nil {
+		d.InformIntervalSec = *v
 	}
 	if v := reported.Identity.ModelName; v != "" {
 		d.Model = v
