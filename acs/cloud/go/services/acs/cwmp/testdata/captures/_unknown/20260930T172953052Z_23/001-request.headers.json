@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "url": "/",
+  "httpVersion": "1.1",
+  "headers": {
+    "host": "lab.example:8443",
+    "x-forwarded-proto": "https"
+  }
+}
