@@ -149,40 +149,6 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.Error(t, store.PutCredentials(&orphan))
 	})
 
-	t.Run("sessions", func(t *testing.T) {
-		got, err := store.GetSession("missing")
-		assert.NoError(t, err)
-		assert.Nil(t, got)
-
-		live := &storage.Session{SessionID: "cookie-live", DeviceID: "00259E-Titan4000-SN2", Step: "inform", CreatedSec: 990, ExpiresSec: 1030}
-		expired := &storage.Session{SessionID: "cookie-expired", DeviceID: "00259E-Titan4000-SN1", Step: "inform", CreatedSec: 900, ExpiresSec: 1000}
-		require.NoError(t, store.PutSession(live))
-		require.NoError(t, store.PutSession(expired))
-
-		got, err = store.GetSession(live.SessionID)
-		assert.NoError(t, err)
-		assert.Equal(t, live, got)
-		got, err = store.GetSession(expired.SessionID)
-		assert.NoError(t, err)
-		assert.Nil(t, got)
-
-		advanced := *live
-		advanced.Step = "get_parameter_values"
-		advanced.ExpiresSec = 1060
-		require.NoError(t, store.PutSession(&advanced))
-		got, err = store.GetSession(live.SessionID)
-		assert.NoError(t, err)
-		assert.Equal(t, &advanced, got)
-
-		require.NoError(t, store.DeleteExpiredSessions())
-		clock.SetAndFreezeClock(t, time.Unix(2000, 0))
-		require.NoError(t, store.DeleteExpiredSessions())
-		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
-		got, err = store.GetSession(live.SessionID)
-		assert.NoError(t, err)
-		assert.Nil(t, got)
-	})
-
 	t.Run("tasks", func(t *testing.T) {
 		const dev = "00259E-Titan4000-SN2"
 		tasks, err := store.ListTasks(dev)

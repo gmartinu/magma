@@ -20,7 +20,6 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 
-	"magma/orc8r/cloud/go/clock"
 	"magma/orc8r/cloud/go/sqorc"
 )
 
@@ -43,6 +42,7 @@ const (
 	credentialsTable   = "acs_credentials"
 	acsUsernameCol     = "acs_username"
 	acsPasswordHashCol = "acs_password_hash"
+	pendingHashCol     = "pending_password_hash"
 	connReqUsernameCol = "conn_req_username"
 	connReqPasswordCol = "conn_req_password"
 	updatedCol         = "updated_sec"
@@ -52,6 +52,15 @@ const (
 	sessionsExpiresIdx = "acs_sessions_expires_idx"
 	sessionIDCol       = "session_id"
 	stepCol            = "step"
+	namespaceCol       = "namespace"
+	rootCol            = "data_model_root"
+	bootstrapCol       = "bootstrap"
+	rotationSentCol    = "rotation_sent"
+	pendingIDCol       = "pending_id"
+	pendingMethodCol   = "pending_method"
+	pendingTaskCol     = "pending_task_id"
+	taskStepCol        = "task_step"
+	requestSeqCol      = "request_seq"
 	createdCol         = "created_sec"
 	expiresCol         = "expires_sec"
 
@@ -77,10 +86,8 @@ var deviceCols = []string{
 }
 
 var credentialsCols = []string{
-	deviceIDCol, acsUsernameCol, acsPasswordHashCol, connReqUsernameCol, connReqPasswordCol, updatedCol,
+	deviceIDCol, acsUsernameCol, acsPasswordHashCol, pendingHashCol, connReqUsernameCol, connReqPasswordCol, updatedCol,
 }
-
-var sessionCols = []string{sessionIDCol, deviceIDCol, stepCol, createdCol, expiresCol}
 
 type sqlACSStorage struct {
 	db      *sql.DB
@@ -127,6 +134,7 @@ func (s *sqlACSStorage) Init() error {
 			Column(deviceIDCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
 			Column(acsUsernameCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
 			Column(acsPasswordHashCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(pendingHashCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
 			Column(connReqUsernameCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
 			Column(connReqPasswordCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
 			Column(updatedCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
@@ -143,6 +151,16 @@ func (s *sqlACSStorage) Init() error {
 			Column(sessionIDCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
 			Column(deviceIDCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
 			Column(stepCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(namespaceCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(rootCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(handlerCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(bootstrapCol).Type(sqorc.ColumnTypeBool).NotNull().Default("FALSE").EndColumn().
+			Column(rotationSentCol).Type(sqorc.ColumnTypeBool).NotNull().Default("FALSE").EndColumn().
+			Column(pendingIDCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(pendingMethodCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(pendingTaskCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(taskStepCol).Type(sqorc.ColumnTypeInt).NotNull().Default(0).EndColumn().
+			Column(requestSeqCol).Type(sqorc.ColumnTypeInt).NotNull().Default(0).EndColumn().
 			Column(createdCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
 			Column(expiresCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
 			ForeignKey(devicesTable, map[string]string{deviceIDCol: deviceIDCol}, sqorc.ColumnOnDeleteCascade).
@@ -279,11 +297,12 @@ func (s *sqlACSStorage) PutCredentials(c *Credentials) error {
 	txFn := func(tx *sql.Tx) (interface{}, error) {
 		_, err := s.builder.Insert(credentialsTable).
 			Columns(credentialsCols...).
-			Values(c.DeviceID, c.ACSUsername, c.ACSPasswordHash, c.ConnReqUsername, c.ConnReqPassword, c.UpdatedSec).
+			Values(c.DeviceID, c.ACSUsername, c.ACSPasswordHash, c.PendingPasswordHash, c.ConnReqUsername, c.ConnReqPassword, c.UpdatedSec).
 			OnConflict(
 				[]sqorc.UpsertValue{
 					{Column: acsUsernameCol, Value: c.ACSUsername},
 					{Column: acsPasswordHashCol, Value: c.ACSPasswordHash},
+					{Column: pendingHashCol, Value: c.PendingPasswordHash},
 					{Column: connReqUsernameCol, Value: c.ConnReqUsername},
 					{Column: connReqPasswordCol, Value: c.ConnReqPassword},
 					{Column: updatedCol, Value: c.UpdatedSec},
@@ -301,73 +320,38 @@ func (s *sqlACSStorage) PutCredentials(c *Credentials) error {
 	return err
 }
 
+func (s *sqlACSStorage) GetCredentials(deviceID string) (*Credentials, error) {
+	return s.getCredentials(sq.Eq{deviceIDCol: deviceID})
+}
+
 func (s *sqlACSStorage) GetCredentialsByUsername(acsUsername string) (*Credentials, error) {
+	return s.getCredentials(sq.Eq{acsUsernameCol: acsUsername})
+}
+
+func (s *sqlACSStorage) getCredentials(where sq.Sqlizer) (*Credentials, error) {
 	c := &Credentials{}
 	err := s.builder.Select(credentialsCols...).
 		From(credentialsTable).
-		Where(sq.Eq{acsUsernameCol: acsUsername}).
+		Where(where).
 		RunWith(s.db).
 		QueryRowContext(context.Background()).
-		Scan(&c.DeviceID, &c.ACSUsername, &c.ACSPasswordHash, &c.ConnReqUsername, &c.ConnReqPassword, &c.UpdatedSec)
+		Scan(&c.DeviceID, &c.ACSUsername, &c.ACSPasswordHash, &c.PendingPasswordHash, &c.ConnReqUsername, &c.ConnReqPassword, &c.UpdatedSec)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get credentials for %s: %w", acsUsername, err)
+		return nil, fmt.Errorf("get credentials: %w", err)
 	}
 	return c, nil
 }
 
-func (s *sqlACSStorage) PutSession(session *Session) error {
-	txFn := func(tx *sql.Tx) (interface{}, error) {
-		_, err := s.builder.Insert(sessionsTable).
-			Columns(sessionCols...).
-			Values(session.SessionID, session.DeviceID, session.Step, session.CreatedSec, session.ExpiresSec).
-			OnConflict(
-				[]sqorc.UpsertValue{
-					{Column: stepCol, Value: session.Step},
-					{Column: expiresCol, Value: session.ExpiresSec},
-				},
-				sessionIDCol,
-			).
-			RunWith(tx).
-			Exec()
-		if err != nil {
-			return nil, fmt.Errorf("put session for %s: %w", session.DeviceID, err)
-		}
-		return nil, nil
-	}
-	_, err := sqorc.ExecInTx(s.db, nil, nil, txFn)
-	return err
-}
-
-func (s *sqlACSStorage) GetSession(sessionID string) (*Session, error) {
-	session := &Session{}
-	err := s.builder.Select(sessionCols...).
-		From(sessionsTable).
-		Where(sq.And{
-			sq.Eq{sessionIDCol: sessionID},
-			sq.Gt{expiresCol: clock.Now().Unix()},
-		}).
-		RunWith(s.db).
-		QueryRowContext(context.Background()).
-		Scan(&session.SessionID, &session.DeviceID, &session.Step, &session.CreatedSec, &session.ExpiresSec)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get session: %w", err)
-	}
-	return session, nil
-}
-
-func (s *sqlACSStorage) DeleteExpiredSessions() error {
-	_, err := s.builder.Delete(sessionsTable).
-		Where(sq.LtOrEq{expiresCol: clock.Now().Unix()}).
+func (s *sqlACSStorage) DeleteCredentials(deviceID string) error {
+	_, err := s.builder.Delete(credentialsTable).
+		Where(sq.Eq{deviceIDCol: deviceID}).
 		RunWith(s.db).
 		Exec()
 	if err != nil {
-		return fmt.Errorf("delete expired sessions: %w", err)
+		return fmt.Errorf("delete credentials of %s: %w", deviceID, err)
 	}
 	return nil
 }
