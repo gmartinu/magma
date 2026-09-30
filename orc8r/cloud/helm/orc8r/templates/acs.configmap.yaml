@@ -11,11 +11,19 @@
 # limitations under the License.
 */}}
 {{- if .Values.acs.enabled -}}
+{{- if .Values.acs.config.bootstrap_password -}}
+{{- fail "acs.config.bootstrap_password must not be set; put it in the acs.secrets secret" -}}
+{{- end -}}
+{{- $config := deepCopy .Values.acs.config -}}
+{{- if .Values.acs.cwmp.ingress.enabled -}}
+{{- /* The proxy overwrites X-Real-IP and X-Forwarded-Proto, so they are the real client address and scheme. */ -}}
+{{- $_ := set $config "trust_proxy_headers" true -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: orc8r-acs
 data:
   acs.yml: |
-{{ .Values.acs.config | toYaml | indent 4 }}
+{{ $config | toYaml | indent 4 }}
 {{- end -}}

@@ -368,8 +368,22 @@ acs:
       orc8r.io/swagger_spec: "true"
     annotations:
       orc8r.io/obsidian_handlers_path_prefixes: /magma/v1/acs/:network_id
+  # Bootstrap credentials and the key sealing ConnectionRequest passwords at
+  # rest reach the service as env from a Secret, never from these values.
+  secrets:
+    # Secret with the keys ACS_BOOTSTRAP_USERNAME, ACS_BOOTSTRAP_PASSWORD and
+    # ACS_ENCRYPTION_KEY (base64 of 32 bytes). Empty: the chart generates
+    # orc8r-acs-secrets on install and keeps it across upgrades and uninstall.
+    existingSecret: ""
+    # Username of the generated secret; its password and key are random.
+    bootstrapUsername: acs-bootstrap
+  # Service config (acs.yml). bootstrap_password is rejected here, use the
+  # secret. trust_proxy_headers is forced on with cwmp.ingress.enabled.
   config:
     cwmp_port: 7547
+    # Sessions a device may start per window; 0 disables the limit.
+    inform_rate_limit: 30
+    inform_rate_window_sec: 300
   # Public CWMP entry point. The regular Orc8r nginx only accepts client-cert
   # mTLS, which CPEs cannot present, so CWMP gets its own LoadBalancer + proxy.
   cwmp:

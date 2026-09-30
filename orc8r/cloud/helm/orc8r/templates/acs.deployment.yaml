@@ -53,9 +53,11 @@ ports:
     containerPort: 9225
   - name: http
     containerPort: 10125
-  # Reserved for the CWMP listener; nothing serves it yet.
   - name: cwmp
     containerPort: {{ .Values.acs.config.cwmp_port }}
+envFrom:
+  - secretRef:
+      name: {{ include "acs.secretName" . }}
 livenessProbe:
   tcpSocket:
     port: 9125
