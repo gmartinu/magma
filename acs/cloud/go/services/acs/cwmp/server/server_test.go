@@ -286,6 +286,35 @@ func TestFactoryResetReturnsToBootstrap(t *testing.T) {
 	assert.Equal(t, h.deviceID(), cpe.Username)
 }
 
+func TestMultiReplicaSessions(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 3)
+	runMultiReplica(t, h)
+}
+
+// runMultiReplica drives full sessions through a round-robin balancer, so
+// consecutive requests of a session, and the Digest challenge and its answer,
+// land on different replicas.
+func runMultiReplica(t *testing.T, h *harness) {
+	cpe := h.cpe(datamodel.RootTR181)
+	s := runSession(t, cpe, cwmp.EventBootstrap, cwmp.EventBoot)
+	assert.Equal(t, []string{"SetParameterValues"}, methods(s))
+
+	ids := []string{
+		h.queue(tasks.TypeRefresh, tasks.Args{}, 3),
+		h.queue(tasks.TypeReboot, tasks.Args{}, 3),
+	}
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Len(t, s.Requests, 5)
+	for _, id := range ids {
+		assert.Equal(t, storage.TaskDone, h.task(id).Status)
+	}
+	s = runSession(t, cpe)
+	assert.Empty(t, s.Requests)
+	for i, n := range h.served {
+		assert.NotZero(t, n, "replica %d served nothing", i)
+	}
+}
+
 func TestCookielessCPE(t *testing.T) {
 	h := newHarness(t, defaultConfig(), 2)
 	cpe := h.cpe(datamodel.RootTR181)
