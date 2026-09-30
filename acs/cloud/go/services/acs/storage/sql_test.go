@@ -128,8 +128,13 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.NoError(t, err)
 		assert.Equal(t, creds, got)
 
+		got, err = store.GetCredentials(creds.DeviceID)
+		assert.NoError(t, err)
+		assert.Equal(t, creds, got)
+
 		rotated := *creds
 		rotated.ACSPasswordHash = "hash2"
+		rotated.PendingPasswordHash = "hash3"
 		rotated.UpdatedSec = 200
 		require.NoError(t, store.PutCredentials(&rotated))
 		got, err = store.GetCredentialsByUsername("cpe-sn2")
@@ -147,6 +152,67 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		orphan.DeviceID = "unknown"
 		orphan.ACSUsername = "cpe-unknown"
 		assert.Error(t, store.PutCredentials(&orphan))
+
+		require.NoError(t, store.DeleteCredentials(creds.DeviceID))
+		got, err = store.GetCredentials(creds.DeviceID)
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+		require.NoError(t, store.PutCredentials(&rotated))
+	})
+
+	t.Run("sessions", func(t *testing.T) {
+		got, err := store.GetSession("missing")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+
+		live := &storage.Session{
+			SessionID: "cookie-live", DeviceID: "00259E-Titan4000-SN2", Step: storage.SessionCPERequests,
+			Namespace: "urn:dslforum-org:cwmp-1-2", Root: "Device.", Handler: "generic", Bootstrap: true,
+			CreatedSec: 990, ExpiresSec: 1030,
+		}
+		older := &storage.Session{SessionID: "cookie-older", DeviceID: "00259E-Titan4000-SN2", Step: storage.SessionCPERequests, CreatedSec: 980, ExpiresSec: 1030}
+		expired := &storage.Session{SessionID: "cookie-expired", DeviceID: "00259E-Titan4000-SN1", Step: storage.SessionCPERequests, CreatedSec: 900, ExpiresSec: 1000}
+		for _, ss := range []*storage.Session{live, older, expired} {
+			require.NoError(t, store.PutSession(ss))
+		}
+
+		got, err = store.GetSession(live.SessionID)
+		assert.NoError(t, err)
+		assert.Equal(t, live, got)
+		got, err = store.GetSession(expired.SessionID)
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+		got, err = store.GetDeviceSession(live.DeviceID)
+		assert.NoError(t, err)
+		assert.Equal(t, live, got)
+		got, err = store.GetDeviceSession(expired.DeviceID)
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+
+		advanced := *live
+		advanced.Step = storage.SessionACSRequests
+		advanced.RotationSent = true
+		advanced.PendingID, advanced.PendingMethod, advanced.PendingTaskID = "id-3", "Reboot", "t1"
+		advanced.TaskStep, advanced.RequestSeq = 2, 3
+		advanced.ExpiresSec = 1060
+		require.NoError(t, store.PutSession(&advanced))
+		got, err = store.GetSession(live.SessionID)
+		assert.NoError(t, err)
+		assert.Equal(t, &advanced, got)
+
+		require.NoError(t, store.EndSession(older.SessionID, "done"))
+		got, err = store.GetSession(older.SessionID)
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+
+		res, err := store.ReapExpired()
+		require.NoError(t, err)
+		assert.Equal(t, storage.ReapResult{Sessions: 1}, res)
+
+		require.NoError(t, store.EndDeviceSessions(live.DeviceID, "new session"))
+		got, err = store.GetSession(live.SessionID)
+		assert.NoError(t, err)
+		assert.Nil(t, got)
 	})
 
 	t.Run("tasks", func(t *testing.T) {
@@ -226,5 +292,45 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		got, _ = store.GetTask("m")
 		assert.Equal(t, storage.TaskFailed, got.Status)
 		assert.Equal(t, "invalid parameter name", got.FaultString)
+
+		// Past its deadline a pending task is neither claimed nor kept.
+		clock.SetAndFreezeClock(t, time.Unix(1050, 0))
+		claimed, err = store.ClaimNextTask(dev, "s1")
+		require.NoError(t, err)
+		assert.Nil(t, claimed)
+		res, err := store.ReapExpired()
+		require.NoError(t, err)
+		assert.Equal(t, storage.ReapResult{ExpiredTasks: 1}, res)
+		got, _ = store.GetTask("late")
+		assert.Equal(t, storage.TaskExpired, got.Status)
+
+		// A task in progress in a session that ends is requeued; one out of
+		// attempts fails.
+		require.NoError(t, store.CreateTask(newTask("r1", 2, 0)))
+		require.NoError(t, store.CreateTask(newTask("r2", 1, 0)))
+		require.NoError(t, store.PutSession(&storage.Session{SessionID: "s2", DeviceID: dev, Step: storage.SessionACSRequests, CreatedSec: 1050, ExpiresSec: 1100}))
+		claimed, _ = store.ClaimNextTask(dev, "s2")
+		assert.Equal(t, "r1", claimed.TaskID)
+		require.NoError(t, store.EndSession("s2", "CPE started a new session"))
+		got, _ = store.GetTask("r1")
+		assert.Equal(t, storage.TaskPending, got.Status)
+		assert.Equal(t, "CPE started a new session", got.FaultString)
+
+		require.NoError(t, store.PutSession(&storage.Session{SessionID: "s3", DeviceID: dev, Step: storage.SessionACSRequests, CreatedSec: 1050, ExpiresSec: 1060}))
+		claimed, _ = store.ClaimNextTask(dev, "s3")
+		assert.Equal(t, "r1", claimed.TaskID)
+		claimed, _ = store.ClaimNextTask(dev, "s3")
+		assert.Equal(t, "r2", claimed.TaskID)
+		clock.SetAndFreezeClock(t, time.Unix(1070, 0))
+		res, err = store.ReapExpired()
+		require.NoError(t, err)
+		assert.Equal(t, storage.ReapResult{Sessions: 1, RequeuedTasks: 2}, res)
+		got, _ = store.GetTask("r1")
+		assert.Equal(t, storage.TaskFailed, got.Status)
+		assert.Equal(t, "session timed out", got.FaultString)
+		got, _ = store.GetTask("r2")
+		assert.Equal(t, storage.TaskFailed, got.Status)
+		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
 	})
+
 }
