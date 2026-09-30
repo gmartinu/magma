@@ -333,4 +333,46 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
 	})
 
+	t.Run("device state", func(t *testing.T) {
+		got, err := store.GetDeviceState("00259E-Titan4000-SN2")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+		st := &storage.DeviceState{DeviceID: "00259E-Titan4000-SN2", Handler: "generic", Model: `{"root":"Device."}`, UpdatedSec: 1}
+		require.NoError(t, store.PutDeviceState(st))
+		st.Model, st.UpdatedSec = `{"root":"InternetGatewayDevice."}`, 2
+		require.NoError(t, store.PutDeviceState(st))
+		got, err = store.GetDeviceState(st.DeviceID)
+		assert.NoError(t, err)
+		assert.Equal(t, st, got)
+	})
+
+	t.Run("secrets", func(t *testing.T) {
+		calls := 0
+		gen := func(v string) func() (string, error) {
+			return func() (string, error) { calls++; return v, nil }
+		}
+		v, err := store.GetOrCreateSecret("nonce", gen("first"))
+		require.NoError(t, err)
+		assert.Equal(t, "first", v)
+		v, err = store.GetOrCreateSecret("nonce", gen("second"))
+		require.NoError(t, err)
+		assert.Equal(t, "first", v)
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("inform rate", func(t *testing.T) {
+		const dev = "00259E-Titan4000-SN1"
+		for want := 1; want <= 3; want++ {
+			n, end, err := store.CountInform(dev, 60)
+			require.NoError(t, err)
+			assert.Equal(t, want, n)
+			assert.Equal(t, int64(1060), end)
+		}
+		clock.SetAndFreezeClock(t, time.Unix(1060, 0))
+		n, end, err := store.CountInform(dev, 60)
+		require.NoError(t, err)
+		assert.Equal(t, 1, n)
+		assert.Equal(t, int64(1120), end)
+		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
+	})
 }
