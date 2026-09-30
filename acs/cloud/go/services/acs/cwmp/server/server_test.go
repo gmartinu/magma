@@ -156,6 +156,18 @@ func TestTasksDrainedOnInform(t *testing.T) {
 	assert.Equal(t, "100.64.0.9", m.WAN.IPv4Address)
 	assert.Equal(t, "SIM4000", m.Identity.ModelName)
 
+	// Refresh and get_parameter_values results are kept as raw parameters,
+	// and the refresh fills in the device record.
+	params, err := h.store.GetParameters(h.deviceID())
+	require.NoError(t, err)
+	assert.Equal(t, "100", params.Values["Device.DeviceInfo.UpTime"].Value)
+	assert.Equal(t, "n71", params.Values["Device.Cellular.Interface.1.Band"].Value)
+	d, err := h.store.GetDevice(h.deviceID())
+	require.NoError(t, err)
+	assert.Equal(t, "SIM4000", d.Model)
+	assert.Equal(t, int64(300), d.InformIntervalSec, "read by the refresh, before the SetParameterValues")
+	assert.Equal(t, []string{cwmp.EventPeriodic}, d.LastInformEvents)
+
 	// The reboot shows up as events of the next session.
 	cpe.Params["Device.DeviceInfo.SoftwareVersion"] = simulator.Param{Value: "2.0.0", Type: "xsd:string"}
 	s = runSession(t, cpe)
