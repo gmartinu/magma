@@ -53,6 +53,36 @@ type Session struct {
 	ExpiresSec int64
 }
 
+// Task states.
+const (
+	TaskPending    = "pending"
+	TaskInProgress = "in_progress"
+	TaskDone       = "done"
+	TaskFailed     = "failed"
+	TaskExpired    = "expired"
+)
+
+// Task is an operation queued for a CPE and executed in its next session.
+type Task struct {
+	TaskID    string
+	DeviceID  string
+	NetworkID string
+	Type      string
+	// Args and Result are JSON documents whose shape depends on Type.
+	Args        string
+	Status      string
+	Attempts    int
+	MaxAttempts int
+	// SessionID is the session executing the task while it is in progress.
+	SessionID   string
+	FaultCode   int
+	FaultString string
+	Result      string
+	CreatedSec  int64
+	UpdatedSec  int64
+	DeadlineSec int64
+}
+
 // ACSStorage is the persistence layer of the acs service.
 type ACSStorage interface {
 	// Init creates the acs tables if they do not exist.
@@ -78,4 +108,21 @@ type ACSStorage interface {
 	GetSession(sessionID string) (*Session, error)
 	// DeleteExpiredSessions removes all expired sessions.
 	DeleteExpiredSessions() error
+
+	// CreateTask queues a task. Tasks of a device run in creation order.
+	CreateTask(task *Task) error
+	// GetTask returns a task, or nil.
+	GetTask(taskID string) (*Task, error)
+	// ListTasks returns the tasks of a device in creation order.
+	ListTasks(deviceID string) ([]*Task, error)
+	// ClaimNextTask locks the oldest runnable task of the device, marks it in
+	// progress in the session and returns it, or nil if there is none.
+	ClaimNextTask(deviceID, sessionID string) (*Task, error)
+	// SaveTaskResult stores the partial result of a multi-RPC task.
+	SaveTaskResult(taskID, result string) error
+	// CompleteTask marks a task done with its result.
+	CompleteTask(taskID, result string) error
+	// FailTask records a fault. A retryable fault requeues the task while it
+	// has attempts left and is before its deadline; otherwise it fails.
+	FailTask(taskID string, faultCode int, faultString string, retryable bool) error
 }

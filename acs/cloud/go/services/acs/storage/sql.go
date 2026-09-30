@@ -54,6 +54,21 @@ const (
 	stepCol            = "step"
 	createdCol         = "created_sec"
 	expiresCol         = "expires_sec"
+
+	tasksTable     = "acs_tasks"
+	tasksDeviceIdx = "acs_tasks_device_idx"
+	tasksStatusIdx = "acs_tasks_status_idx"
+	taskIDCol      = "task_id"
+	typeCol        = "type"
+	argsCol        = "args"
+	statusCol      = "status"
+	attemptsCol    = "attempts"
+	maxAttemptsCol = "max_attempts"
+	faultCodeCol   = "fault_code"
+	faultStringCol = "fault_string"
+	resultCol      = "result"
+	seqCol         = "seq"
+	deadlineCol    = "deadline_sec"
 )
 
 var deviceCols = []string{
@@ -136,15 +151,47 @@ func (s *sqlACSStorage) Init() error {
 		if err != nil {
 			return nil, fmt.Errorf("create %s table: %w", sessionsTable, err)
 		}
-		for idx, col := range map[string]string{sessionsDeviceIdx: deviceIDCol, sessionsExpiresIdx: expiresCol} {
-			_, err = s.builder.CreateIndex(idx).
+
+		_, err = s.builder.CreateTable(tasksTable).
+			IfNotExists().
+			Column(taskIDCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
+			Column(deviceIDCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(networkIDCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(typeCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(argsCol).Type(sqorc.ColumnTypeText).NotNull().Default("'{}'").EndColumn().
+			Column(statusCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(attemptsCol).Type(sqorc.ColumnTypeInt).NotNull().Default(0).EndColumn().
+			Column(maxAttemptsCol).Type(sqorc.ColumnTypeInt).NotNull().EndColumn().
+			Column(sessionIDCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(faultCodeCol).Type(sqorc.ColumnTypeInt).NotNull().Default(0).EndColumn().
+			Column(faultStringCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(resultCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(seqCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
+			Column(createdCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
+			Column(updatedCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
+			Column(deadlineCol).Type(sqorc.ColumnTypeBigInt).NotNull().Default(0).EndColumn().
+			ForeignKey(devicesTable, map[string]string{deviceIDCol: deviceIDCol}, sqorc.ColumnOnDeleteCascade).
+			RunWith(tx).
+			Exec()
+		if err != nil {
+			return nil, fmt.Errorf("create %s table: %w", tasksTable, err)
+		}
+
+		indexes := []struct{ name, table, col string }{
+			{sessionsDeviceIdx, sessionsTable, deviceIDCol},
+			{sessionsExpiresIdx, sessionsTable, expiresCol},
+			{tasksDeviceIdx, tasksTable, deviceIDCol},
+			{tasksStatusIdx, tasksTable, statusCol},
+		}
+		for _, idx := range indexes {
+			_, err = s.builder.CreateIndex(idx.name).
 				IfNotExists().
-				On(sessionsTable).
-				Columns(col).
+				On(idx.table).
+				Columns(idx.col).
 				RunWith(tx).
 				Exec()
 			if err != nil {
-				return nil, fmt.Errorf("create %s index: %w", idx, err)
+				return nil, fmt.Errorf("create %s index: %w", idx.name, err)
 			}
 		}
 		return nil, nil
