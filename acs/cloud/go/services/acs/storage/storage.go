@@ -104,7 +104,8 @@ type Task struct {
 	Status      string
 	Attempts    int
 	MaxAttempts int
-	// SessionID is the session executing the task while it is in progress.
+	// SessionID is the session executing the task while it is in progress,
+	// or the session whose retryable fault requeued it.
 	SessionID   string
 	FaultCode   int
 	FaultString string
@@ -177,7 +178,8 @@ type ACSStorage interface {
 	// ListTasks returns the tasks of a device in creation order.
 	ListTasks(deviceID string) ([]*Task, error)
 	// ClaimNextTask locks the oldest runnable task of the device, marks it in
-	// progress in the session and returns it, or nil if there is none.
+	// progress in the session and returns it, or nil if there is none. A task
+	// requeued by a fault in the same session is not runnable in it.
 	ClaimNextTask(deviceID, sessionID string) (*Task, error)
 	// SaveTaskResult stores the partial result of a multi-RPC task.
 	SaveTaskResult(taskID, result string) error

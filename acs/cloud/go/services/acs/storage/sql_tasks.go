@@ -114,6 +114,8 @@ func (s *sqlACSStorage) ClaimNextTask(deviceID, sessionID string) (*Task, error)
 			From(tasksTable).
 			Where(sq.And{
 				sq.Eq{deviceIDCol: deviceID, statusCol: TaskPending},
+				// A task requeued by a fault in this session waits for the next.
+				sq.NotEq{sessionIDCol: sessionID},
 				sq.Or{sq.Eq{deadlineCol: 0}, sq.Gt{deadlineCol: now}},
 			}).
 			OrderBy(seqCol).
@@ -169,13 +171,15 @@ func (s *sqlACSStorage) FailTask(taskID string, faultCode int, faultString strin
 			return nil, ErrTaskNotFound
 		}
 		t, now := tasks[0], clock.Now().Unix()
-		status := TaskFailed
+		status, sessionID := TaskFailed, ""
 		if retryable && t.Attempts < t.MaxAttempts && (t.DeadlineSec == 0 || t.DeadlineSec > now) {
-			status = TaskPending
+			// Keeping the session ID makes ClaimNextTask leave the task for a
+			// later session instead of retrying it right away.
+			status, sessionID = TaskPending, t.SessionID
 		}
 		_, err = s.builder.Update(tasksTable).
 			Set(statusCol, status).
-			Set(sessionIDCol, "").
+			Set(sessionIDCol, sessionID).
 			Set(faultCodeCol, faultCode).
 			Set(faultStringCol, faultString).
 			Set(updatedCol, now).
