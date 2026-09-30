@@ -24,9 +24,11 @@ import (
 	"magma/acs/cloud/go/services/acs/auth"
 	"magma/acs/cloud/go/services/acs/cwmp"
 	"magma/acs/cloud/go/services/acs/cwmp/server"
+	"magma/acs/cloud/go/services/acs/cwmp/simulator"
 	"magma/acs/cloud/go/services/acs/datamodel"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/acs/cloud/go/services/acs/tasks"
+	"magma/orc8r/cloud/go/clock"
 )
 
 func TestBootstrapRotationAndPeriodic(t *testing.T) {
@@ -110,6 +112,145 @@ func TestRotationRefused(t *testing.T) {
 	// Still on bootstrap credentials, so the ACS tries again next session.
 	s = runSession(t, cpe, cwmp.EventPeriodic)
 	assert.Equal(t, []string{"SetParameterValues"}, methods(s))
+}
+
+func TestTasksDrainedOnInform(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+	runSession(t, cpe, cwmp.EventBootstrap)
+
+	reboot := h.queue(tasks.TypeReboot, tasks.Args{}, 3)
+	refresh := h.queue(tasks.TypeRefresh, tasks.Args{}, 3)
+	gpv := h.queue(tasks.TypeGetParameterValues, tasks.Args{ParameterNames: []string{"Device.DeviceInfo.UpTime", "Device.Cellular.Interface.1.RSRP"}}, 3)
+	spv := h.queue(tasks.TypeSetParameterValues, tasks.Args{ParameterValues: []tasks.ParameterValue{
+		{Name: "Device.ManagementServer.PeriodicInformInterval", Value: "600", Type: "xsd:unsignedInt"},
+	}}, 3)
+	gpn := h.queue(tasks.TypeGetParameterNames, tasks.Args{ParameterPath: "Device.Cellular.", NextLevel: true}, 3)
+
+	s := runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{
+		"Reboot",
+		"GetParameterValues", "GetParameterValues", "GetParameterValues", "GetParameterValues",
+		"GetParameterValues", "SetParameterValues", "GetParameterNames",
+	}, methods(s))
+	assert.Equal(t, &cwmp.Reboot{CommandKey: reboot}, s.Requests[0])
+
+	for _, id := range []string{reboot, refresh, gpv, spv, gpn} {
+		task := h.task(id)
+		assert.Equal(t, storage.TaskDone, task.Status, id)
+		assert.Equal(t, 1, task.Attempts)
+	}
+	res, err := tasks.ParseResult(h.task(gpv).Result)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"Device.DeviceInfo.UpTime": "100", "Device.Cellular.Interface.1.RSRP": "-95"}, res.Values)
+	res, _ = tasks.ParseResult(h.task(spv).Result)
+	assert.Equal(t, 0, *res.Status)
+	assert.Equal(t, "600", cpe.Params["Device.ManagementServer.PeriodicInformInterval"].Value)
+	res, _ = tasks.ParseResult(h.task(gpn).Result)
+	assert.Contains(t, res.Names, tasks.ParameterInfo{Name: "Device.Cellular.AccessPoint."})
+
+	m := h.model()
+	assert.Equal(t, -95.0, *m.Cellular.RSRP)
+	assert.Equal(t, 14.0, *m.Cellular.SINR)
+	assert.Equal(t, "n71", m.Cellular.Band)
+	assert.Equal(t, "100.64.0.9", m.WAN.IPv4Address)
+	assert.Equal(t, "SIM4000", m.Identity.ModelName)
+
+	// The reboot shows up as events of the next session.
+	cpe.Params["Device.DeviceInfo.SoftwareVersion"] = simulator.Param{Value: "2.0.0", Type: "xsd:string"}
+	s = runSession(t, cpe)
+	assert.Empty(t, s.Requests)
+	device, _ := h.store.GetDevice(h.deviceID())
+	assert.Equal(t, "2.0.0", device.Firmware)
+}
+
+func TestRefreshToleratesMissingObjects(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR098)
+	runSession(t, cpe, cwmp.EventBootstrap)
+	delete(cpe.Params, "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress")
+	id := h.queue(tasks.TypeRefresh, tasks.Args{}, 1)
+	s := runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{"GetParameterValues", "GetParameterValues", "GetParameterValues"}, methods(s))
+	task := h.task(id)
+	assert.Equal(t, storage.TaskDone, task.Status)
+	res, _ := tasks.ParseResult(task.Result)
+	require.Len(t, res.Faults, 1)
+	assert.Equal(t, cwmp.FaultCPEInvalidParamName, res.Faults[0].FaultCode)
+	assert.Equal(t, "GetParameterValues InternetGatewayDevice.WANDevice.", res.Faults[0].Request)
+	assert.Equal(t, datamodel.RootTR098, h.model().Root)
+	assert.Equal(t, "1.0.0-sim", h.model().Firmware.SoftwareVersion)
+}
+
+func TestTaskFaults(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+	runSession(t, cpe, cwmp.EventBootstrap)
+
+	readOnly := h.queue(tasks.TypeSetParameterValues, tasks.Args{ParameterValues: []tasks.ParameterValue{{Name: "Device.DeviceInfo.SerialNumber", Value: "x"}}}, 3)
+	missing := h.queue(tasks.TypeGetParameterValues, tasks.Args{ParameterNames: []string{"Device.Nope"}}, 3)
+	flaky := h.queue(tasks.TypeReboot, tasks.Args{}, 2)
+	after := h.queue(tasks.TypeGetParameterValues, tasks.Args{ParameterNames: []string{"Device.DeviceInfo.UpTime"}}, 3)
+	cpe.Faults["Reboot"] = cwmp.NewFault(cwmp.FaultCPEInternalError, "busy")
+
+	s := runSession(t, cpe, cwmp.EventPeriodic)
+	// A fault ends only its task; the session goes on with the next one.
+	assert.Equal(t, []string{"SetParameterValues", "GetParameterValues", "Reboot", "GetParameterValues"}, methods(s))
+
+	task := h.task(readOnly)
+	assert.Equal(t, storage.TaskFailed, task.Status)
+	assert.Equal(t, cwmp.FaultCPEInvalidArguments, task.FaultCode)
+	assert.Equal(t, "Invalid arguments", task.FaultString)
+	task = h.task(missing)
+	assert.Equal(t, storage.TaskFailed, task.Status)
+	assert.Equal(t, cwmp.FaultCPEInvalidParamName, task.FaultCode)
+	// 9002 is transient: the task waits for the next session.
+	task = h.task(flaky)
+	assert.Equal(t, storage.TaskPending, task.Status)
+	assert.Equal(t, 1, task.Attempts)
+	assert.Equal(t, "busy", task.FaultString)
+	assert.Equal(t, storage.TaskDone, h.task(after).Status)
+
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{"Reboot"}, methods(s))
+	task = h.task(flaky)
+	assert.Equal(t, storage.TaskFailed, task.Status)
+	assert.Equal(t, 2, task.Attempts)
+
+	// A malformed stored task fails without reaching the CPE.
+	require.NoError(t, h.store.CreateTask(&storage.Task{TaskID: "bad", DeviceID: h.deviceID(), Type: "upgrade", Args: "{}", Status: storage.TaskPending, MaxAttempts: 1}))
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Empty(t, s.Requests)
+	assert.Equal(t, storage.TaskFailed, h.task("bad").Status)
+}
+
+func TestSessionTimeoutRequeuesTask(t *testing.T) {
+	h := newHarness(t, defaultConfig(), 1)
+	cpe := h.cpe(datamodel.RootTR181)
+	runSession(t, cpe, cwmp.EventBootstrap)
+
+	first := h.queue(tasks.TypeGetParameterValues, tasks.Args{ParameterNames: []string{"Device.DeviceInfo.UpTime"}}, 3)
+	reboot := h.queue(tasks.TypeReboot, tasks.Args{}, 3)
+	cpe.StopAfter = 1
+	s, err := cpe.RunSession(cwmp.EventPeriodic)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"GetParameterValues", "Reboot"}, methods(s))
+	assert.Equal(t, storage.TaskDone, h.task(first).Status)
+	assert.Equal(t, storage.TaskInProgress, h.task(reboot).Status)
+
+	clock.SetAndFreezeClock(t, time.Now().Add(2*time.Minute))
+	defer clock.UnfreezeClock(t)
+	res, err := h.store.ReapExpired()
+	require.NoError(t, err)
+	assert.Equal(t, storage.ReapResult{Sessions: 1, RequeuedTasks: 1}, res)
+	assert.Equal(t, storage.TaskPending, h.task(reboot).Status)
+
+	cpe.StopAfter = 0
+	s = runSession(t, cpe, cwmp.EventPeriodic)
+	assert.Equal(t, []string{"Reboot"}, methods(s))
+	task := h.task(reboot)
+	assert.Equal(t, storage.TaskDone, task.Status)
+	assert.Equal(t, 2, task.Attempts)
 }
 
 func TestNewInformEndsOpenSession(t *testing.T) {
