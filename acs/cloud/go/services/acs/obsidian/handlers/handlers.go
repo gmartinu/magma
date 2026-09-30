@@ -14,56 +14,52 @@ limitations under the License.
 package handlers
 
 import (
-	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
-
 	"magma/acs/cloud/go/acs"
-	"magma/acs/cloud/go/services/acs/obsidian/models"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/orc8r/cloud/go/services/obsidian"
 )
 
 const (
+	// UnclaimedPath is served under its own obsidian path prefix: under
+	// ManageNetworkPath it would be authorized as a network named
+	// "unclaimed" instead of requiring access to every network.
+	UnclaimedPath     = obsidian.V1Root + acs.ModuleName + obsidian.UrlSep + "unclaimed"
 	ManageNetworkPath = obsidian.V1Root + acs.ModuleName + obsidian.UrlSep + ":network_id"
 	DevicesPath       = ManageNetworkPath + obsidian.UrlSep + "devices"
-	TasksPath         = DevicesPath + obsidian.UrlSep + ":device_id" + obsidian.UrlSep + "tasks"
+	DevicePath        = DevicesPath + obsidian.UrlSep + ":device_id"
+	ClaimPath         = DevicePath + obsidian.UrlSep + "claim"
+	ParametersPath    = DevicePath + obsidian.UrlSep + "parameters"
+	TasksPath         = DevicePath + obsidian.UrlSep + "tasks"
 	TaskPath          = TasksPath + obsidian.UrlSep + ":task_id"
 )
+
+// PathPrefixes are the obsidian path prefixes the handlers are served under.
+var PathPrefixes = []string{UnclaimedPath, ManageNetworkPath}
 
 type Handlers struct {
 	store storage.ACSStorage
 	// TaskMaxAttempts and TaskTTL apply to tasks created without them.
 	TaskMaxAttempts int
 	TaskTTL         time.Duration
+	// Online derives the online state of devices.
+	Online storage.OnlinePolicy
 }
 
 func NewHandlers(store storage.ACSStorage) *Handlers {
-	return &Handlers{store: store, TaskMaxAttempts: 3, TaskTTL: 7 * 24 * time.Hour}
+	return &Handlers{store: store, TaskMaxAttempts: 3, TaskTTL: 7 * 24 * time.Hour, Online: storage.DefaultOnlinePolicy}
 }
 
 func (h *Handlers) GetHandlers() []obsidian.Handler {
 	return []obsidian.Handler{
+		{Path: UnclaimedPath, Methods: obsidian.GET, HandlerFunc: h.listUnclaimed},
 		{Path: DevicesPath, Methods: obsidian.GET, HandlerFunc: h.listDevices},
+		{Path: DevicePath, Methods: obsidian.GET, HandlerFunc: h.getDevice},
+		{Path: ClaimPath, Methods: obsidian.POST, HandlerFunc: h.claimDevice},
+		{Path: ParametersPath, Methods: obsidian.GET, HandlerFunc: h.listParameters},
 		{Path: TasksPath, Methods: obsidian.GET, HandlerFunc: h.listTasks},
 		{Path: TasksPath, Methods: obsidian.POST, HandlerFunc: h.createTask},
 		{Path: TaskPath, Methods: obsidian.GET, HandlerFunc: h.getTask},
 	}
-}
-
-func (h *Handlers) listDevices(c echo.Context) error {
-	networkID, nerr := obsidian.GetNetworkId(c)
-	if nerr != nil {
-		return nerr
-	}
-	devices, err := h.store.ListDevices(networkID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	out := make([]*models.AcsDevice, 0, len(devices))
-	for _, d := range devices {
-		out = append(out, (&models.AcsDevice{}).FromStorage(d))
-	}
-	return c.JSON(http.StatusOK, out)
 }

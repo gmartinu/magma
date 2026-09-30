@@ -24,7 +24,9 @@ import (
 	"magma/acs/cloud/go/services/acs/tasks"
 )
 
-func (m *AcsDevice) FromStorage(d *storage.Device) *AcsDevice {
+// FromStorage fills the device model; online is derived by the caller's
+// online policy.
+func (m *AcsDevice) FromStorage(d *storage.Device, online bool) *AcsDevice {
 	m.DeviceID = d.DeviceID
 	m.Oui = d.OUI
 	m.ProductClass = d.ProductClass
@@ -34,6 +36,8 @@ func (m *AcsDevice) FromStorage(d *storage.Device) *AcsDevice {
 	m.Handler = d.Handler
 	m.FirstSeen = strfmt.DateTime(time.Unix(d.FirstSeenSec, 0).UTC())
 	m.LastSeen = strfmt.DateTime(time.Unix(d.LastSeenSec, 0).UTC())
+	m.Online = online
+	m.PeriodicInformInterval = d.InformIntervalSec
 	return m
 }
 
