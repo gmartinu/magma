@@ -63,3 +63,14 @@ func TestParseEncryptionKey(t *testing.T) {
 	_, err = storage.ParseEncryptionKey(base64.StdEncoding.EncodeToString([]byte("16 bytes only..!")))
 	assert.Error(t, err)
 }
+
+func TestOnlinePolicy(t *testing.T) {
+	p := storage.OnlinePolicy{IntervalMultiple: 2, DefaultIntervalSec: 100}
+	assert.True(t, p.Online(&storage.Device{LastSeenSec: 400, InformIntervalSec: 300}, 1000))
+	assert.False(t, p.Online(&storage.Device{LastSeenSec: 399, InformIntervalSec: 300}, 1000))
+	assert.True(t, p.Online(&storage.Device{LastSeenSec: 800}, 1000))
+	assert.False(t, p.Online(&storage.Device{LastSeenSec: 799}, 1000))
+	// A zero policy falls back to the defaults.
+	assert.True(t, storage.OnlinePolicy{}.Online(&storage.Device{LastSeenSec: 1000 - 7200}, 1000))
+	assert.False(t, storage.OnlinePolicy{}.Online(&storage.Device{LastSeenSec: 1000 - 7201}, 1000))
+}
