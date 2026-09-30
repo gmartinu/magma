@@ -182,4 +182,83 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.NoError(t, err)
 		assert.Nil(t, got)
 	})
+
+	t.Run("tasks", func(t *testing.T) {
+		const dev = "00259E-Titan4000-SN2"
+		tasks, err := store.ListTasks(dev)
+		require.NoError(t, err)
+		assert.Empty(t, tasks)
+		got, err := store.GetTask("missing")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+		assert.ErrorIs(t, store.CompleteTask("missing", ""), storage.ErrTaskNotFound)
+		assert.ErrorIs(t, store.FailTask("missing", 1, "", true), storage.ErrTaskNotFound)
+
+		newTask := func(id string, maxAttempts int, deadline int64) *storage.Task {
+			return &storage.Task{
+				TaskID: id, DeviceID: dev, NetworkID: "n1", Type: "reboot", Args: "{}", Status: storage.TaskPending,
+				MaxAttempts: maxAttempts, CreatedSec: 1000, UpdatedSec: 1000, DeadlineSec: deadline,
+			}
+		}
+		// Created in the same clock tick, in an order their IDs do not sort by.
+		for _, task := range []*storage.Task{newTask("z", 2, 0), newTask("a", 1, 0), newTask("m", 1, 1100), newTask("late", 1, 1050)} {
+			require.NoError(t, store.CreateTask(task))
+		}
+		assert.Error(t, store.CreateTask(newTask("z", 1, 0)))
+		orphan := newTask("orphan", 1, 0)
+		orphan.DeviceID = "unknown"
+		assert.Error(t, store.CreateTask(orphan))
+
+		tasks, err = store.ListTasks(dev)
+		require.NoError(t, err)
+		require.Len(t, tasks, 4)
+		assert.Equal(t, []string{"z", "a", "m", "late"}, []string{tasks[0].TaskID, tasks[1].TaskID, tasks[2].TaskID, tasks[3].TaskID})
+		assert.Equal(t, newTask("z", 2, 0), tasks[0])
+
+		// Claim in creation order; a claimed task is not claimed again.
+		claimed, err := store.ClaimNextTask(dev, "s1")
+		require.NoError(t, err)
+		assert.Equal(t, "z", claimed.TaskID)
+		assert.Equal(t, storage.TaskInProgress, claimed.Status)
+		assert.Equal(t, 1, claimed.Attempts)
+		assert.Equal(t, "s1", claimed.SessionID)
+		got, err = store.GetTask("z")
+		require.NoError(t, err)
+		assert.Equal(t, claimed, got)
+
+		// A retryable fault with attempts left requeues the task, with the
+		// fault written back.
+		require.NoError(t, store.FailTask("z", 9002, "internal error", true))
+		got, _ = store.GetTask("z")
+		assert.Equal(t, storage.TaskPending, got.Status)
+		assert.Equal(t, 9002, got.FaultCode)
+		assert.Equal(t, "", got.SessionID)
+
+		claimed, err = store.ClaimNextTask(dev, "s1")
+		require.NoError(t, err)
+		assert.Equal(t, "z", claimed.TaskID)
+		assert.Equal(t, 2, claimed.Attempts)
+		// Out of attempts: retryable or not, the task fails.
+		require.NoError(t, store.FailTask("z", 9002, "internal error", true))
+		got, _ = store.GetTask("z")
+		assert.Equal(t, storage.TaskFailed, got.Status)
+
+		claimed, _ = store.ClaimNextTask(dev, "s1")
+		assert.Equal(t, "a", claimed.TaskID)
+		require.NoError(t, store.SaveTaskResult("a", `{"partial":true}`))
+		got, _ = store.GetTask("a")
+		assert.Equal(t, storage.TaskInProgress, got.Status)
+		assert.Equal(t, `{"partial":true}`, got.Result)
+		require.NoError(t, store.CompleteTask("a", `{"ok":true}`))
+		got, _ = store.GetTask("a")
+		assert.Equal(t, storage.TaskDone, got.Status)
+		assert.Equal(t, `{"ok":true}`, got.Result)
+
+		claimed, _ = store.ClaimNextTask(dev, "s1")
+		assert.Equal(t, "m", claimed.TaskID)
+		require.NoError(t, store.FailTask("m", 9005, "invalid parameter name", false))
+		got, _ = store.GetTask("m")
+		assert.Equal(t, storage.TaskFailed, got.Status)
+		assert.Equal(t, "invalid parameter name", got.FaultString)
+	})
 }
