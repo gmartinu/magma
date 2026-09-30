@@ -43,7 +43,8 @@ func newTaskStore(t *testing.T) storage.ACSStorage {
 	db.SetMaxOpenConns(1)
 	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder())
 	require.NoError(t, store.Init())
-	require.NoError(t, store.UpsertDevice(&storage.Device{DeviceID: dev, NetworkID: "n1", OUI: "00259E", SerialNumber: "SN1"}))
+	require.NoError(t, store.UpsertDevice(&storage.Device{DeviceID: dev, OUI: "00259E", SerialNumber: "SN1"}))
+	require.NoError(t, store.ClaimDevice(dev, "n1"))
 	require.NoError(t, store.UpsertDevice(&storage.Device{DeviceID: "unclaimed", OUI: "00259E", SerialNumber: "SN9"}))
 	return store
 }
