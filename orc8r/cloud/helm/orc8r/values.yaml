@@ -370,3 +370,56 @@ acs:
       orc8r.io/obsidian_handlers_path_prefixes: /magma/v1/acs/:network_id
   config:
     cwmp_port: 7547
+  # Public CWMP entry point. The regular Orc8r nginx only accepts client-cert
+  # mTLS, which CPEs cannot present, so CWMP gets its own LoadBalancer + proxy.
+  cwmp:
+    ingress:
+      enabled: false
+      # Public name the CPEs are provisioned with; must match the certificate.
+      hostname: ""
+      replicas: 1
+      # Stock nginx: the Orc8r nginx image is built around client-cert mTLS config.
+      image:
+        repository: nginxinc/nginx-unprivileged
+        tag: 1.27-alpine
+        pullPolicy: IfNotPresent
+      # CPEs trust public CAs only, so this must be a publicly trusted server cert.
+      tls:
+        # certManager: render a Certificate; existingSecret: use a kubernetes.io/tls secret.
+        mode: certManager
+        certManager:
+          issuerRef:
+            name: ""
+            kind: ClusterIssuer
+            group: cert-manager.io
+        existingSecret:
+          name: ""
+      service:
+        httpsPort: 443
+        annotations: {}
+        loadBalancerIP: ""
+        loadBalancerSourceRanges: []
+        # Local preserves the CPE source IP for rate limiting and audit.
+        externalTrafficPolicy: Local
+      # Lab only. Forwarded with X-Forwarded-Proto: http, so the acs service
+      # refuses Basic auth on it.
+      plainHttp:
+        enabled: false
+        port: 7547
+      # Per source IP, enforced here. Per device ID limits are enforced in the
+      # acs service (it alone can read the device identity from the SOAP body).
+      # Many CPEs can share one IP behind CGNAT, so keep these generous.
+      rateLimit:
+        requestsPerSecond: 20
+        burst: 40
+        connectionsPerIP: 20
+      maxBodySize: 8m
+      proxyReadTimeout: 60s
+      # Restrict external reachability to the CWMP ports and the acs pod's
+      # CWMP port to the proxy. Needs a CNI that enforces NetworkPolicy.
+      networkPolicy:
+        enabled: true
+      resources: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}

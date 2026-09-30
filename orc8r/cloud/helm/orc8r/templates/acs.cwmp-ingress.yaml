@@ -1,0 +1,294 @@
+{{/*
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+*/}}
+{{- if and .Values.acs.enabled .Values.acs.cwmp.ingress.enabled -}}
+{{- $ing := .Values.acs.cwmp.ingress -}}
+{{- $name := print .Release.Name "-acs-cwmp" -}}
+{{- $tlsMode := $ing.tls.mode -}}
+{{- if not (has $tlsMode (list "certManager" "existingSecret")) -}}
+{{- fail "acs.cwmp.ingress.tls.mode must be certManager or existingSecret" -}}
+{{- end -}}
+{{- $host := required "acs.cwmp.ingress.hostname must be provided" $ing.hostname -}}
+{{- $tlsSecret := print $name "-tls" -}}
+{{- if eq $tlsMode "existingSecret" -}}
+{{- $tlsSecret = required "acs.cwmp.ingress.tls.existingSecret.name must be provided" $ing.tls.existingSecret.name -}}
+{{- end -}}
+{{- $upstream := print "orc8r-acs." .Release.Namespace ".svc.cluster.local:" .Values.acs.config.cwmp_port -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+data:
+  nginx.conf: |
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+    error_log /dev/stderr warn;
+    events {}
+    http {
+      # The unprivileged image cannot write under /var/cache/nginx.
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+      server_tokens off;
+      access_log /dev/stdout;
+
+      # Per source IP. Per device ID limits live in the acs service, which is the
+      # only place that can see the device identity inside the SOAP body.
+      limit_req_zone $binary_remote_addr zone=cwmp_req:10m rate={{ $ing.rateLimit.requestsPerSecond }}r/s;
+      limit_conn_zone $binary_remote_addr zone=cwmp_conn:10m;
+
+      server {
+        listen 8081;
+        location = /healthz { return 200 "ok\n"; }
+      }
+
+      server {
+        listen 8443 ssl;
+        server_name {{ $host }};
+        ssl_certificate /etc/nginx/tls/tls.crt;
+        ssl_certificate_key /etc/nginx/tls/tls.key;
+        # CPE TLS stacks are old; TLS 1.2 is the floor, 1.3 is offered.
+        ssl_protocols TLSv1.2 TLSv1.3;
+        include /etc/nginx/cwmp_location.conf;
+      }
+      {{- if $ing.plainHttp.enabled }}
+
+      # Lab only. X-Forwarded-Proto is "http" here, so the acs service refuses Basic auth.
+      server {
+        listen 8080;
+        include /etc/nginx/cwmp_location.conf;
+      }
+      {{- end }}
+    }
+  cwmp_location.conf: |
+    client_max_body_size {{ $ing.maxBodySize }};
+    location / {
+      limit_req zone=cwmp_req burst={{ $ing.rateLimit.burst }} nodelay;
+      limit_conn cwmp_conn {{ $ing.rateLimit.connectionsPerIP }};
+      limit_req_status 429;
+      proxy_pass http://{{ $upstream }};
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host $host;
+      # Overwrite, never append: the CPE is untrusted and could forge the chain.
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_read_timeout {{ $ing.proxyReadTimeout }};
+    }
+{{- if eq $tlsMode "certManager" }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+spec:
+  secretName: {{ $tlsSecret }}
+  dnsNames:
+    - {{ $host }}
+  issuerRef:
+    name: {{ required "acs.cwmp.ingress.tls.certManager.issuerRef.name must be provided" $ing.tls.certManager.issuerRef.name }}
+    kind: {{ $ing.tls.certManager.issuerRef.kind }}
+    group: {{ $ing.tls.certManager.issuerRef.group }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+spec:
+  replicas: {{ $ing.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "selector-labels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "selector-labels" . | indent 8 }}
+      annotations:
+        checksum/config: {{ toYaml $ing | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tls
+          secret:
+            secretName: {{ $tlsSecret }}
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: nginx
+          image: {{ $ing.image.repository }}:{{ $ing.image.tag }}
+          imagePullPolicy: {{ $ing.image.pullPolicy }}
+          args: ["nginx", "-c", "/etc/nginx/conf/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: cwmps
+              containerPort: 8443
+            {{- if $ing.plainHttp.enabled }}
+            - name: cwmp-plain
+              containerPort: 8080
+            {{- end }}
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf/nginx.conf
+              subPath: nginx.conf
+            - name: config
+              mountPath: /etc/nginx/cwmp_location.conf
+              subPath: cwmp_location.conf
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          {{- with $ing.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+      {{- with $ing.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $ing.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $ing.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+  {{- with $ing.service.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  # Local keeps the real CPE address visible to nginx; the default SNAT would
+  # make every device look like a node IP and defeat the per-IP rate limit.
+  externalTrafficPolicy: {{ $ing.service.externalTrafficPolicy }}
+  {{- with $ing.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with $ing.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  selector:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "selector-labels" . | indent 4 }}
+  ports:
+    - name: cwmps
+      port: {{ $ing.service.httpsPort }}
+      targetPort: cwmps
+    {{- if $ing.plainHttp.enabled }}
+    - name: cwmp-plain
+      port: {{ $ing.plainHttp.port }}
+      targetPort: cwmp-plain
+    {{- end }}
+{{- if $ing.networkPolicy.enabled }}
+---
+# The proxy is the only pod reachable from outside, and only on the CWMP ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: acs-cwmp-proxy
+{{ include "selector-labels" . | indent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: cwmps
+          protocol: TCP
+        {{- if $ing.plainHttp.enabled }}
+        - port: cwmp-plain
+          protocol: TCP
+        {{- end }}
+---
+# acs keeps its gRPC/HTTP ports cluster-internal; the CWMP port accepts only the proxy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ print .Release.Name "-acs" }}
+  labels:
+    app.kubernetes.io/component: acs
+{{ include "labels" . | indent 4 }}
+{{ include "orc8r-labels" . | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: acs
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: grpc
+          protocol: TCP
+        - port: grpc-internal
+          protocol: TCP
+        - port: http
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: acs-cwmp-proxy
+      ports:
+        - port: cwmp
+          protocol: TCP
+{{- end }}
+{{- end -}}
