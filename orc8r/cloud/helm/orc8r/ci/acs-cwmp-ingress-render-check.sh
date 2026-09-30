@@ -26,8 +26,28 @@ out=$(render --set acs.enabled=true)
 has "$out" 'name: orc8r-acs' "acs on, ingress off"
 hasnt "$out" 'acs-cwmp' "acs on, ingress off"
 hasnt "$out" 'kind: NetworkPolicy' "acs on, ingress off"
+has "$out" 'name: orc8r-acs-secrets' "generated secret"
+has "$out" 'helm.sh/resource-policy: keep' "generated secret"
+has "$out" 'inform_rate_limit: 30' "rate limit passed"
+has "$out" 'inform_rate_window_sec: 300' "rate limit passed"
+hasnt "$out" 'trust_proxy_headers' "ingress off"
+hasnt "$out" 'bootstrap_password' "no plaintext password"
+envfrom=$(grep -A2 'envFrom:' <<<"$out")
+has "$envfrom" 'name: orc8r-acs-secrets' "acs env from secret"
+key=$(sed -n 's/^ *ACS_ENCRYPTION_KEY: //p' <<<"$out" | base64 -d | base64 -d | wc -c | tr -d ' ')
+[ "$key" = 32 ] || fail "generated encryption key must decode to 32 bytes, got $key"
+user=$(sed -n 's/^ *ACS_BOOTSTRAP_USERNAME: //p' <<<"$out" | base64 -d)
+[ "$user" = acs-bootstrap ] || fail "generated bootstrap username, got '$user'"
+
+out=$(render --set acs.enabled=true --set acs.secrets.existingSecret=my-acs)
+hasnt "$out" 'orc8r-acs-secrets' "existing acs secret"
+envfrom=$(grep -A2 'envFrom:' <<<"$out")
+has "$envfrom" 'name: my-acs' "existing acs secret"
+
+render --set acs.enabled=true --set acs.config.bootstrap_password=x >/dev/null 2>&1 && fail "plaintext bootstrap password must fail"
 
 out=$(render "${ING[@]}" "${CM[@]}")
+has "$out" 'trust_proxy_headers: true' "ingress on"
 has "$out" 'kind: Certificate' "cert-manager"
 has "$out" 'secretName: t-acs-cwmp-tls' "cert-manager"
 has "$out" 'X-Forwarded-Proto \$scheme' "cert-manager"
