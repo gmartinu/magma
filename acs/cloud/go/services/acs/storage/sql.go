@@ -64,20 +64,29 @@ const (
 	createdCol         = "created_sec"
 	expiresCol         = "expires_sec"
 
-	tasksTable     = "acs_tasks"
-	tasksDeviceIdx = "acs_tasks_device_idx"
-	tasksStatusIdx = "acs_tasks_status_idx"
-	taskIDCol      = "task_id"
-	typeCol        = "type"
-	argsCol        = "args"
-	statusCol      = "status"
-	attemptsCol    = "attempts"
-	maxAttemptsCol = "max_attempts"
-	faultCodeCol   = "fault_code"
-	faultStringCol = "fault_string"
-	resultCol      = "result"
-	seqCol         = "seq"
-	deadlineCol    = "deadline_sec"
+	tasksTable       = "acs_tasks"
+	tasksDeviceIdx   = "acs_tasks_device_idx"
+	tasksStatusIdx   = "acs_tasks_status_idx"
+	taskIDCol        = "task_id"
+	typeCol          = "type"
+	argsCol          = "args"
+	statusCol        = "status"
+	attemptsCol      = "attempts"
+	maxAttemptsCol   = "max_attempts"
+	faultCodeCol     = "fault_code"
+	faultStringCol   = "fault_string"
+	resultCol        = "result"
+	seqCol           = "seq"
+	deadlineCol      = "deadline_sec"
+	deviceStateTable = "acs_device_state"
+	modelJSONCol     = "model"
+
+	secretsTable   = "acs_secrets"
+	nameCol        = "name"
+	valueCol       = "value"
+	informRateTbl  = "acs_inform_rate"
+	windowEndCol   = "window_end_sec"
+	informCountCol = "inform_count"
 )
 
 var deviceCols = []string{
@@ -193,6 +202,41 @@ func (s *sqlACSStorage) Init() error {
 			Exec()
 		if err != nil {
 			return nil, fmt.Errorf("create %s table: %w", tasksTable, err)
+		}
+
+		_, err = s.builder.CreateTable(deviceStateTable).
+			IfNotExists().
+			Column(deviceIDCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
+			Column(handlerCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(modelJSONCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			Column(updatedCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
+			ForeignKey(devicesTable, map[string]string{deviceIDCol: deviceIDCol}, sqorc.ColumnOnDeleteCascade).
+			RunWith(tx).
+			Exec()
+		if err != nil {
+			return nil, fmt.Errorf("create %s table: %w", deviceStateTable, err)
+		}
+
+		_, err = s.builder.CreateTable(secretsTable).
+			IfNotExists().
+			Column(nameCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
+			Column(valueCol).Type(sqorc.ColumnTypeText).NotNull().EndColumn().
+			RunWith(tx).
+			Exec()
+		if err != nil {
+			return nil, fmt.Errorf("create %s table: %w", secretsTable, err)
+		}
+
+		_, err = s.builder.CreateTable(informRateTbl).
+			IfNotExists().
+			Column(deviceIDCol).Type(sqorc.ColumnTypeText).PrimaryKey().EndColumn().
+			Column(windowEndCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
+			Column(informCountCol).Type(sqorc.ColumnTypeInt).NotNull().EndColumn().
+			ForeignKey(devicesTable, map[string]string{deviceIDCol: deviceIDCol}, sqorc.ColumnOnDeleteCascade).
+			RunWith(tx).
+			Exec()
+		if err != nil {
+			return nil, fmt.Errorf("create %s table: %w", informRateTbl, err)
 		}
 
 		indexes := []struct{ name, table, col string }{

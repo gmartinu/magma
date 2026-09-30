@@ -114,6 +114,14 @@ type Task struct {
 	DeadlineSec int64
 }
 
+// DeviceState is the last normalized model of a device, as JSON.
+type DeviceState struct {
+	DeviceID   string
+	Handler    string
+	Model      string
+	UpdatedSec int64
+}
+
 // ReapResult counts what ReapExpired cleaned up.
 type ReapResult struct {
 	Sessions      int
@@ -178,4 +186,16 @@ type ACSStorage interface {
 	// FailTask records a fault. A retryable fault requeues the task while it
 	// has attempts left and is before its deadline; otherwise it fails.
 	FailTask(taskID string, faultCode int, faultString string, retryable bool) error
+
+	// PutDeviceState stores the normalized model of a device.
+	PutDeviceState(state *DeviceState) error
+	// GetDeviceState returns the normalized model of a device, or nil.
+	GetDeviceState(deviceID string) (*DeviceState, error)
+
+	// GetOrCreateSecret returns the named secret shared by every replica,
+	// creating it with generate on first use.
+	GetOrCreateSecret(name string, generate func() (string, error)) (string, error)
+	// CountInform counts an Inform of a device in fixed windows of windowSec
+	// and returns the count in the current window and when it ends.
+	CountInform(deviceID string, windowSec int64) (count int, windowEndSec int64, err error)
 }
