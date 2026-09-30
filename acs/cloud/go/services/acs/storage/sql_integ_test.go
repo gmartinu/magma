@@ -35,7 +35,7 @@ import (
 
 func TestSQLACSStorage_Postgres_Integration(t *testing.T) {
 	db := openPostgres(t, "acs___storage")
-	runStorageTests(t, storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder()))
+	runStorageTests(t, db)
 }
 
 // TestClaimNextTask_Postgres_Concurrent claims from several connections at

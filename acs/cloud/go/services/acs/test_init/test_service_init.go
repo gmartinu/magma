@@ -57,7 +57,9 @@ func StartTestService(t *testing.T, cwmpConfig server.Config) *TestService {
 	require.NoError(t, err)
 	// Every connection to :memory: is its own database.
 	db.SetMaxOpenConns(1)
-	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder())
+	sealer, err := storage.NewSealer(make([]byte, storage.EncryptionKeySize))
+	require.NoError(t, err)
+	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder(), storage.WithSealer(sealer))
 	require.NoError(t, store.Init())
 
 	if srv.EchoServer != nil {

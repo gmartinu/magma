@@ -14,6 +14,7 @@ limitations under the License.
 package acs_test
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -63,4 +64,23 @@ func TestServerConfig(t *testing.T) {
 
 	_, err = acs_service.Config{BasicAuth: "sometimes"}.ServerConfig()
 	assert.Error(t, err)
+}
+
+func TestSealer(t *testing.T) {
+	off := false
+	t.Setenv(acs_service.EncryptionKeyEnv, "")
+	_, err := acs_service.Config{}.Sealer()
+	assert.Error(t, err, "rotation stores a ConnectionRequest password, so the key is required")
+	s, err := acs_service.Config{RotateCredentials: &off}.Sealer()
+	assert.NoError(t, err)
+	assert.Nil(t, s)
+
+	t.Setenv(acs_service.EncryptionKeyEnv, "dG9vIHNob3J0")
+	_, err = acs_service.Config{}.Sealer()
+	assert.Error(t, err)
+
+	t.Setenv(acs_service.EncryptionKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	s, err = acs_service.Config{}.Sealer()
+	require.NoError(t, err)
+	assert.NotNil(t, s)
 }

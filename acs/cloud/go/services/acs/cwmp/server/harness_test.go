@@ -76,7 +76,9 @@ func newHarness(t *testing.T, cfg server.Config, replicas int) *harness {
 }
 
 func newHarnessOn(t *testing.T, db *sql.DB, cfg server.Config, replicas int) *harness {
-	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder())
+	sealer, err := storage.NewSealer(make([]byte, storage.EncryptionKeySize))
+	require.NoError(t, err)
+	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder(), storage.WithSealer(sealer))
 	require.NoError(t, store.Init())
 	h := &harness{t: t, store: store, served: make([]int64, replicas)}
 	for i := 0; i < replicas; i++ {
