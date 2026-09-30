@@ -264,9 +264,16 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		got, _ = store.GetTask("z")
 		assert.Equal(t, storage.TaskPending, got.Status)
 		assert.Equal(t, 9002, got.FaultCode)
-		assert.Equal(t, "", got.SessionID)
+		assert.Equal(t, "s1", got.SessionID)
 
+		// Not retried in the session that faulted, but in the next one.
 		claimed, err = store.ClaimNextTask(dev, "s1")
+		require.NoError(t, err)
+		assert.Equal(t, "a", claimed.TaskID)
+		require.NoError(t, store.FailTask("a", 9002, "internal error", true))
+		got, _ = store.GetTask("a")
+		assert.Equal(t, storage.TaskFailed, got.Status, "a has one attempt")
+		claimed, err = store.ClaimNextTask(dev, "s1b")
 		require.NoError(t, err)
 		assert.Equal(t, "z", claimed.TaskID)
 		assert.Equal(t, 2, claimed.Attempts)
@@ -276,22 +283,15 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.Equal(t, storage.TaskFailed, got.Status)
 
 		claimed, _ = store.ClaimNextTask(dev, "s1")
-		assert.Equal(t, "a", claimed.TaskID)
-		require.NoError(t, store.SaveTaskResult("a", `{"partial":true}`))
-		got, _ = store.GetTask("a")
+		assert.Equal(t, "m", claimed.TaskID)
+		require.NoError(t, store.SaveTaskResult("m", `{"partial":true}`))
+		got, _ = store.GetTask("m")
 		assert.Equal(t, storage.TaskInProgress, got.Status)
 		assert.Equal(t, `{"partial":true}`, got.Result)
-		require.NoError(t, store.CompleteTask("a", `{"ok":true}`))
-		got, _ = store.GetTask("a")
+		require.NoError(t, store.CompleteTask("m", `{"ok":true}`))
+		got, _ = store.GetTask("m")
 		assert.Equal(t, storage.TaskDone, got.Status)
 		assert.Equal(t, `{"ok":true}`, got.Result)
-
-		claimed, _ = store.ClaimNextTask(dev, "s1")
-		assert.Equal(t, "m", claimed.TaskID)
-		require.NoError(t, store.FailTask("m", 9005, "invalid parameter name", false))
-		got, _ = store.GetTask("m")
-		assert.Equal(t, storage.TaskFailed, got.Status)
-		assert.Equal(t, "invalid parameter name", got.FaultString)
 
 		// Past its deadline a pending task is neither claimed nor kept.
 		clock.SetAndFreezeClock(t, time.Unix(1050, 0))
@@ -303,6 +303,15 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.Equal(t, storage.ReapResult{ExpiredTasks: 1}, res)
 		got, _ = store.GetTask("late")
 		assert.Equal(t, storage.TaskExpired, got.Status)
+
+		require.NoError(t, store.CreateTask(newTask("perm", 3, 0)))
+		claimed, _ = store.ClaimNextTask(dev, "s1")
+		assert.Equal(t, "perm", claimed.TaskID)
+		require.NoError(t, store.FailTask("perm", 9005, "invalid parameter name", false))
+		got, _ = store.GetTask("perm")
+		assert.Equal(t, storage.TaskFailed, got.Status)
+		assert.Equal(t, "invalid parameter name", got.FaultString)
+		assert.Equal(t, "", got.SessionID)
 
 		// A task in progress in a session that ends is requeued; one out of
 		// attempts fails.
