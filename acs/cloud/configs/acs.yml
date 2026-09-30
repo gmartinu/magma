@@ -9,6 +9,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Port of the CWMP (TR-069) listener that CPEs connect to. Reserved for the
-# CWMP server; the service does not listen on it yet.
+# Port of the CWMP (TR-069) listener that CPEs connect to. Plain HTTP; public
+# TLS is terminated by the ingress proxy in front of it.
 cwmp_port: 7547
+
+# Digest realm. Stored password hashes are bound to it: changing it forces
+# every CPE back through bootstrap.
+cwmp_realm: "magma-acs"
+# When CPEs may authenticate with Basic: never, tls_only or always (lab only).
+basic_auth: "tls_only"
+# Take TLS and the client address from X-Forwarded-Proto and X-Real-IP. Only
+# enable it when the listener is reachable solely through the ingress proxy,
+# which overwrites those headers.
+trust_proxy_headers: false
+
+# Shared credentials accepted from devices the ACS has no credentials for,
+# replaced with per-device ones on the first session. Empty disables
+# bootstrap. ACS_BOOTSTRAP_USERNAME and ACS_BOOTSTRAP_PASSWORD override them.
+bootstrap_username: ""
+bootstrap_password: ""
+rotate_credentials: true
+
+session_timeout_sec: 120
+nonce_ttl_sec: 300
+# Sessions a device may start per window; 0 disables the limit.
+inform_rate_limit: 30
+inform_rate_window_sec: 300
+maintenance_interval_sec: 30
+# Defaults of tasks created without max_attempts or ttl_sec.
+task_max_attempts: 3
+task_ttl_sec: 604800
