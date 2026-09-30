@@ -36,7 +36,7 @@ type AcsDevice struct {
 	// Model handler the ACS uses for this CPE
 	Handler string `json:"handler,omitempty"`
 
-	// last seen
+	// When the CPE last sent an Inform
 	// Required: true
 	// Format: date-time
 	LastSeen strfmt.DateTime `json:"last_seen"`
@@ -44,10 +44,18 @@ type AcsDevice struct {
 	// model
 	Model string `json:"model,omitempty"`
 
+	// Whether the last Inform is at most online_interval_multiple periodic inform intervals old (the service config; 2 by default, with online_default_interval_sec standing in for an unknown interval)
+	//
+	// Required: true
+	Online bool `json:"online"`
+
 	// oui
 	// Example: 00259E
 	// Required: true
 	Oui string `json:"oui"`
+
+	// PeriodicInformInterval in seconds the CPE last reported; absent while unknown
+	PeriodicInformInterval int64 `json:"periodic_inform_interval,omitempty"`
 
 	// product class
 	// Example: Titan4000
@@ -72,6 +80,10 @@ func (m *AcsDevice) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := m.validateLastSeen(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateOnline(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -122,6 +134,15 @@ func (m *AcsDevice) validateLastSeen(formats strfmt.Registry) error {
 	}
 
 	if err := validate.FormatOf("last_seen", "body", "date-time", m.LastSeen.String(), formats); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *AcsDevice) validateOnline(formats strfmt.Registry) error {
+
+	if err := validate.Required("online", "body", bool(m.Online)); err != nil {
 		return err
 	}
 
