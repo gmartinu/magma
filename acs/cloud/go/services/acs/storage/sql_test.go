@@ -385,3 +385,11 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
 	})
 }
+
+func testKey() []byte {
+	key := make([]byte, storage.EncryptionKeySize)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	return key
+}
