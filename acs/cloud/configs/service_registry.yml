@@ -21,4 +21,5 @@ services:
       orc8r.io/swagger_spec: "true"
     annotations:
       orc8r.io/obsidian_handlers_path_prefixes: >
+        /magma/v1/acs/unclaimed,
         /magma/v1/acs/:network_id,

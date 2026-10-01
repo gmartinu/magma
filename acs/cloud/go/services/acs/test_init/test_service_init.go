@@ -15,6 +15,7 @@ package test_init
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,7 +50,7 @@ func StartTestService(t *testing.T, cwmpConfig server.Config) *TestService {
 		orc8r.SwaggerSpecLabel:      "true",
 	}
 	annotations := map[string]string{
-		orc8r.ObsidianHandlersPathPrefixesAnnotation: handlers.ManageNetworkPath,
+		orc8r.ObsidianHandlersPathPrefixesAnnotation: strings.Join(handlers.PathPrefixes, ","),
 	}
 	srv, lis, plis := test_utils.NewTestOrchestratorService(t, acs.ModuleName, acs_service.ServiceName, labels, annotations)
 

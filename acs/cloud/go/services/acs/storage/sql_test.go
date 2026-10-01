@@ -372,6 +372,93 @@ func runStorageTests(t *testing.T, db *sql.DB) {
 		assert.Equal(t, st, got)
 	})
 
+	t.Run("claims and filters", func(t *testing.T) {
+		now := int64(10000)
+		policy := storage.OnlinePolicy{IntervalMultiple: 1.5, DefaultIntervalSec: 1000}
+		devices := []*storage.Device{
+			// Interval 400: online while at most 600s old.
+			{DeviceID: "F-1", OUI: "F", SerialNumber: "1", Model: "M-claim", LastSeenSec: now - 600, InformIntervalSec: 400,
+				LastInformEvents: []string{"2 PERIODIC"}},
+			{DeviceID: "F-2", OUI: "F", SerialNumber: "2", Model: "M-claim", LastSeenSec: now - 601, InformIntervalSec: 400},
+			// Unknown interval: online while at most 1500s old.
+			{DeviceID: "F-3", OUI: "F", SerialNumber: "3", Model: "M-other", LastSeenSec: now - 1500},
+		}
+		for _, d := range devices {
+			require.NoError(t, store.UpsertDevice(d))
+		}
+		got, err := store.GetDevice("F-1")
+		require.NoError(t, err)
+		assert.Equal(t, devices[0], got)
+
+		ids := func(f storage.DeviceFilter) []string {
+			f.Policy, f.NowSec = policy, now
+			list, err := store.FindDevices(f)
+			require.NoError(t, err)
+			out := []string{}
+			for _, d := range list {
+				if f.Online != nil {
+					assert.Equal(t, *f.Online, policy.Online(d, now), "SQL and Go agree on %s", d.DeviceID)
+				}
+				out = append(out, d.DeviceID)
+			}
+			return out
+		}
+		yes, no := true, false
+		assert.Equal(t, []string{"F-1", "F-2"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-claim"}))
+		assert.Equal(t, []string{"F-1"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-claim", Online: &yes}))
+		assert.Equal(t, []string{"F-2"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-claim", Online: &no}))
+		assert.Equal(t, []string{"F-3"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-other", Online: &yes}))
+		_, err = store.FindDevices(storage.DeviceFilter{})
+		assert.Error(t, err)
+
+		require.NoError(t, store.ClaimDevice("F-1", "claim-net"))
+		require.NoError(t, store.ClaimDevice("F-3", "claim-net"))
+		assert.ErrorIs(t, store.ClaimDevice("F-1", "other-net"), storage.ErrDeviceClaimed)
+		assert.ErrorIs(t, store.ClaimDevice("F-1", "claim-net"), storage.ErrDeviceClaimed)
+		assert.ErrorIs(t, store.ClaimDevice("F-9", "claim-net"), storage.ErrDeviceNotFound)
+		assert.Error(t, store.ClaimDevice("F-2", ""))
+		assert.Equal(t, []string{"F-1", "F-3"}, ids(storage.DeviceFilter{NetworkID: "claim-net"}))
+		assert.Equal(t, []string{"F-3"}, ids(storage.DeviceFilter{NetworkID: "claim-net", Model: "M-other"}))
+		assert.Equal(t, []string{"F-2"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-claim"}))
+
+		// A claim survives the device reporting again.
+		refreshed := *devices[0]
+		refreshed.LastSeenSec = now
+		refreshed.LastInformEvents = nil
+		require.NoError(t, store.UpsertDevice(&refreshed))
+		got, err = store.GetDevice("F-1")
+		require.NoError(t, err)
+		assert.Equal(t, "claim-net", got.NetworkID)
+		assert.Nil(t, got.LastInformEvents)
+	})
+
+	t.Run("parameters", func(t *testing.T) {
+		got, err := store.GetParameters("F-1")
+		require.NoError(t, err)
+		assert.Nil(t, got)
+		require.NoError(t, store.MergeParameters("F-1", nil, 100))
+		got, err = store.GetParameters("F-1")
+		require.NoError(t, err)
+		assert.Nil(t, got, "nothing read, nothing stored")
+
+		require.NoError(t, store.MergeParameters("F-1", map[string]string{"Device.A": "1", "Device.B": "2"}, 100))
+		require.NoError(t, store.MergeParameters("F-1", map[string]string{"Device.B": "3", "Device.C": `{"not":"json"}`}, 200))
+		got, err = store.GetParameters("F-1")
+		require.NoError(t, err)
+		assert.Equal(t, &storage.Parameters{
+			DeviceID: "F-1",
+			Values: map[string]storage.ParameterValue{
+				"Device.A": {Value: "1", UpdatedSec: 100},
+				"Device.B": {Value: "3", UpdatedSec: 200},
+				"Device.C": {Value: `{"not":"json"}`, UpdatedSec: 200},
+			},
+			UpdatedSec: 200,
+		}, got)
+
+		// Parameters only exist for known devices.
+		assert.Error(t, store.MergeParameters("unknown", map[string]string{"Device.A": "1"}, 100))
+	})
+
 	t.Run("secrets", func(t *testing.T) {
 		calls := 0
 		gen := func(v string) func() (string, error) {

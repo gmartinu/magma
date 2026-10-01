@@ -23,6 +23,7 @@ import (
 
 	acs_service "magma/acs/cloud/go/services/acs"
 	"magma/acs/cloud/go/services/acs/auth"
+	"magma/acs/cloud/go/services/acs/storage"
 )
 
 func TestServerConfig(t *testing.T) {
@@ -64,6 +65,12 @@ func TestServerConfig(t *testing.T) {
 
 	_, err = acs_service.Config{BasicAuth: "sometimes"}.ServerConfig()
 	assert.Error(t, err)
+}
+
+func TestOnlinePolicy(t *testing.T) {
+	assert.Equal(t, storage.DefaultOnlinePolicy, acs_service.Config{}.OnlinePolicy())
+	p := acs_service.Config{OnlineIntervalMultiple: 1.5, OnlineDefaultIntervalSec: 600}.OnlinePolicy()
+	assert.Equal(t, storage.OnlinePolicy{IntervalMultiple: 1.5, DefaultIntervalSec: 600}, p)
 }
 
 func TestSealer(t *testing.T) {

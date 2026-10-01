@@ -69,6 +69,7 @@ func main() {
 
 	restHandlers := handlers.NewHandlers(store)
 	restHandlers.TaskMaxAttempts, restHandlers.TaskTTL = serviceConfig.TaskDefaults()
+	restHandlers.Online = serviceConfig.OnlinePolicy()
 	obsidian.AttachHandlers(srv.EchoServer, restHandlers.GetHandlers())
 	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(acs_service.ServiceName))
 

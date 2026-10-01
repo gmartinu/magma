@@ -367,6 +367,9 @@ acs:
       orc8r.io/obsidian_handlers: "true"
       orc8r.io/swagger_spec: "true"
     annotations:
-      orc8r.io/obsidian_handlers_path_prefixes: /magma/v1/acs/:network_id
+      # unclaimed has its own prefix so it needs access to every network.
+      orc8r.io/obsidian_handlers_path_prefixes: >
+        /magma/v1/acs/unclaimed,
+        /magma/v1/acs/:network_id,
   config:
     cwmp_port: 7547

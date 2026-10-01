@@ -39,3 +39,8 @@ maintenance_interval_sec: 30
 # Defaults of tasks created without max_attempts or ttl_sec.
 task_max_attempts: 3
 task_ttl_sec: 604800
+# A device is online while its last Inform is at most this many periodic
+# inform intervals old (one missed Inform is tolerated at 2). Devices that
+# have not reported ManagementServer.PeriodicInformInterval use the default.
+online_interval_multiple: 2
+online_default_interval_sec: 3600

@@ -16,6 +16,12 @@ magma-gen-meta:
       filename: acs_task_request_swaggergen.go
     - go-struct-name: AcsParameterValue
       filename: acs_parameter_value_swaggergen.go
+    - go-struct-name: AcsDeviceDetail
+      filename: acs_device_detail_swaggergen.go
+    - go-struct-name: AcsInform
+      filename: acs_inform_swaggergen.go
+    - go-struct-name: AcsParameter
+      filename: acs_parameter_swaggergen.go
 
 info:
   title: ACS
@@ -29,6 +35,29 @@ tags:
     description: Endpoints related to TR-069 CPEs managed by the ACS
 
 paths:
+  /acs/unclaimed:
+    get:
+      summary: List the CPEs no network has claimed
+      description: >
+        CPEs that reached the ACS but belong to no network yet. They are not
+        scoped to a tenant, so this needs access to every network; tenants
+        claim a CPE by its device ID instead. Unclaimed CPEs can only be
+        listed: they have no detail, parameters or tasks until claimed.
+      tags:
+        - ACS
+      parameters:
+        - $ref: '#/parameters/acs_model'
+        - $ref: '#/parameters/acs_online'
+      responses:
+        '200':
+          description: Unclaimed CPEs
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/acs_device'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
   /acs/{network_id}/devices:
     get:
       summary: List the CPEs claimed by the network
@@ -36,6 +65,8 @@ paths:
         - ACS
       parameters:
         - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_model'
+        - $ref: '#/parameters/acs_online'
       responses:
         '200':
           description: CPEs claimed by the network
@@ -46,9 +77,70 @@ paths:
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
+  /acs/{network_id}/devices/{device_id}:
+    get:
+      summary: Get a CPE with its last Inform and normalized state
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+      responses:
+        '200':
+          description: The CPE
+          schema:
+            $ref: '#/definitions/acs_device_detail'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/devices/{device_id}/claim:
+    post:
+      summary: Claim an unclaimed CPE for the network
+      description: >
+        Fails with 404 for a CPE the ACS has not seen and 409 for one another
+        network, or this one, already claimed.
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+      responses:
+        '200':
+          description: The claimed CPE
+          schema:
+            $ref: '#/definitions/acs_device'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/devices/{device_id}/parameters:
+    get:
+      summary: List the raw TR-069 parameters last read from a CPE
+      description: >
+        Values from Informs and from refresh and get_parameter_values tasks,
+        each with when it was last read, ordered by name.
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+        - in: query
+          name: prefix
+          description: Only parameters whose name starts with it, e.g. Device.Cellular.
+          required: false
+          type: string
+      responses:
+        '200':
+          description: Parameters of the CPE
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/acs_parameter'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
   /acs/{network_id}/devices/{device_id}/tasks:
     get:
-      summary: List the tasks of a CPE, oldest first
+      summary: List the tasks of a CPE, oldest first, as its task history
       tags:
         - ACS
       parameters:
@@ -107,6 +199,18 @@ parameters:
     description: TR-069 DeviceId as OUI-ProductClass-SerialNumber
     required: true
     type: string
+  acs_model:
+    in: query
+    name: model
+    description: Only CPEs reporting exactly this model name
+    required: false
+    type: string
+  acs_online:
+    in: query
+    name: online
+    description: Only CPEs that are (true) or are not (false) online
+    required: false
+    type: boolean
   acs_task_id:
     in: path
     name: task_id
@@ -125,6 +229,7 @@ definitions:
       - serial_number
       - first_seen
       - last_seen
+      - online
     properties:
       device_id:
         x-nullable: false
@@ -156,6 +261,79 @@ definitions:
         type: string
         format: date-time
       last_seen:
+        description: When the CPE last sent an Inform
+        x-nullable: false
+        type: string
+        format: date-time
+      online:
+        description: >
+          Whether the last Inform is at most online_interval_multiple periodic
+          inform intervals old (the service config; 2 by default, with
+          online_default_interval_sec standing in for an unknown interval)
+        x-nullable: false
+        type: boolean
+      periodic_inform_interval:
+        description: PeriodicInformInterval in seconds the CPE last reported; absent while unknown
+        type: integer
+        format: int64
+
+  acs_inform:
+    description: The last Inform of a CPE
+    type: object
+    x-nullable: false
+    required:
+      - time
+      - events
+    properties:
+      time:
+        x-nullable: false
+        type: string
+        format: date-time
+      events:
+        description: Event codes, e.g. 2 PERIODIC
+        type: array
+        items:
+          type: string
+
+  acs_device_detail:
+    description: A CPE with its last Inform and normalized state
+    type: object
+    x-nullable: false
+    required:
+      - device
+      - last_inform
+    properties:
+      device:
+        $ref: '#/definitions/acs_device'
+      last_inform:
+        $ref: '#/definitions/acs_inform'
+      state:
+        description: Vendor-independent model of the CPE (identity, firmware, cellular KPIs, WAN, management server)
+        type: object
+      state_updated:
+        description: When the state last changed; absent without state
+        x-nullable: true
+        type: string
+        format: date-time
+
+  acs_parameter:
+    description: A raw TR-069 parameter as last read from the CPE
+    type: object
+    x-nullable: false
+    required:
+      - name
+      - value
+      - updated
+    properties:
+      name:
+        x-nullable: false
+        type: string
+        example: Device.Cellular.Interface.1.RSRP
+      value:
+        x-nullable: false
+        type: string
+        example: '-95'
+      updated:
         x-nullable: false
         type: string
         format: date-time

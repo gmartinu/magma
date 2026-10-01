@@ -57,6 +57,11 @@ type Config struct {
 	MaintenanceIntervalSec int   `yaml:"maintenance_interval_sec"`
 	TaskMaxAttempts        int   `yaml:"task_max_attempts"`
 	TaskTTLSec             int   `yaml:"task_ttl_sec"`
+	// A device is online while its last Inform is at most
+	// OnlineIntervalMultiple periodic inform intervals old, using
+	// OnlineDefaultIntervalSec for devices that have not reported one.
+	OnlineIntervalMultiple   float64 `yaml:"online_interval_multiple"`
+	OnlineDefaultIntervalSec int64   `yaml:"online_default_interval_sec"`
 }
 
 // ServerConfig returns the runtime config of the CWMP endpoint.
@@ -103,6 +108,18 @@ func (c Config) Sealer() (*storage.Sealer, error) {
 		return nil, err
 	}
 	return storage.NewSealer(key)
+}
+
+// OnlinePolicy is how the REST API derives the online state of a device.
+func (c Config) OnlinePolicy() storage.OnlinePolicy {
+	p := storage.DefaultOnlinePolicy
+	if c.OnlineIntervalMultiple > 0 {
+		p.IntervalMultiple = c.OnlineIntervalMultiple
+	}
+	if c.OnlineDefaultIntervalSec > 0 {
+		p.DefaultIntervalSec = c.OnlineDefaultIntervalSec
+	}
+	return p
 }
 
 // MaintenanceInterval is how often expired sessions and tasks are reaped.
