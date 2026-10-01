@@ -83,10 +83,13 @@ func (p OnlinePolicy) Online(d *Device, nowSec int64) bool {
 	return (nowSec-d.LastSeenSec)*1000 <= p.multipleMilli()*interval
 }
 
-// DeviceFilter selects devices. Either NetworkID or Unclaimed must be set.
+// DeviceFilter selects devices. One of NetworkID, Claimed or Unclaimed must
+// be set.
 type DeviceFilter struct {
 	// NetworkID selects the devices claimed by the network.
 	NetworkID string
+	// Claimed selects the devices claimed by any network.
+	Claimed bool
 	// Unclaimed selects the devices no network has claimed.
 	Unclaimed bool
 	// Model, when set, must equal the model name exactly.
@@ -225,6 +228,9 @@ type ACSStorage interface {
 	ListDevices(networkID string) ([]*Device, error)
 	// FindDevices returns the devices matching the filter, ordered by ID.
 	FindDevices(filter DeviceFilter) ([]*Device, error)
+	// IncrementInformTotal counts one more Inform from the device and
+	// returns how many it has sent since it was first seen.
+	IncrementInformTotal(deviceID string) (int64, error)
 	// ClaimDevice assigns an unclaimed device to a network. It returns
 	// ErrDeviceNotFound or ErrDeviceClaimed when it cannot.
 	ClaimDevice(deviceID, networkID string) error

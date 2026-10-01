@@ -43,6 +43,7 @@ const (
 	lastSeenCol     = "last_seen_sec"
 	intervalCol     = "inform_interval_sec"
 	eventsCol       = "last_inform_events"
+	informsTotalCol = "informs_total"
 
 	credentialsTable   = "acs_credentials"
 	acsUsernameCol     = "acs_username"
@@ -148,6 +149,7 @@ func (s *sqlACSStorage) Init() error {
 			Column(lastSeenCol).Type(sqorc.ColumnTypeBigInt).NotNull().EndColumn().
 			Column(intervalCol).Type(sqorc.ColumnTypeBigInt).NotNull().Default(0).EndColumn().
 			Column(eventsCol).Type(sqorc.ColumnTypeText).NotNull().Default("''").EndColumn().
+			Column(informsTotalCol).Type(sqorc.ColumnTypeBigInt).NotNull().Default(0).EndColumn().
 			RunWith(tx).
 			Exec()
 		if err != nil {
@@ -345,8 +347,10 @@ func (s *sqlACSStorage) FindDevices(f DeviceFilter) ([]*Device, error) {
 		where = append(where, sq.Eq{networkIDCol: nil})
 	case f.NetworkID != "":
 		where = append(where, sq.Eq{networkIDCol: f.NetworkID})
+	case f.Claimed:
+		where = append(where, sq.NotEq{networkIDCol: nil})
 	default:
-		return nil, errors.New("find devices: network ID or unclaimed required")
+		return nil, errors.New("find devices: network ID, claimed or unclaimed required")
 	}
 	if f.Model != "" {
 		where = append(where, sq.Eq{modelCol: f.Model})
@@ -360,6 +364,34 @@ func (s *sqlACSStorage) FindDevices(f DeviceFilter) ([]*Device, error) {
 		where = append(where, sq.Expr(cond, f.NowSec, f.Policy.multipleMilli(), f.Policy.defaultInterval()))
 	}
 	return s.selectDevices(where)
+}
+
+func (s *sqlACSStorage) IncrementInformTotal(deviceID string) (int64, error) {
+	txFn := func(tx *sql.Tx) (interface{}, error) {
+		res, err := s.builder.Update(devicesTable).
+			Set(informsTotalCol, sq.Expr(informsTotalCol+" + 1")).
+			Where(sq.Eq{deviceIDCol: deviceID}).
+			RunWith(tx).
+			Exec()
+		if err != nil {
+			return nil, fmt.Errorf("count inform of %s: %w", deviceID, err)
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return nil, ErrDeviceNotFound
+		}
+		var total int64
+		err = s.builder.Select(informsTotalCol).From(devicesTable).Where(sq.Eq{deviceIDCol: deviceID}).
+			RunWith(tx).QueryRow().Scan(&total)
+		if err != nil {
+			return nil, fmt.Errorf("count inform of %s: %w", deviceID, err)
+		}
+		return total, nil
+	}
+	ret, err := sqorc.ExecInTx(s.db, nil, nil, txFn)
+	if err != nil {
+		return 0, err
+	}
+	return ret.(int64), nil
 }
 
 func (s *sqlACSStorage) ClaimDevice(deviceID, networkID string) error {
