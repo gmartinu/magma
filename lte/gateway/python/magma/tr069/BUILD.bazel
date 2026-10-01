@@ -9,33 +9,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@python_deps//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_library")
 
-# Deprecated aliases: the TR-069 layer moved to //lte/gateway/python/magma/tr069.
 py_library(
     name = "models",
     srcs = ["models.py"],
     visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/tr069:models"],
-)
-
-py_library(
-    name = "rpc_methods",
-    srcs = ["rpc_methods.py"],
-    visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/tr069:rpc_methods"],
+    deps = [
+        requirement("spyne"),
+        ":spyne_mods",
+    ],
 )
 
 py_library(
     name = "server",
     srcs = ["server.py"],
     visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/tr069:server"],
+    deps = [
+        ":rpc_methods",
+        ":spyne_mods",
+    ],
+)
+
+py_library(
+    name = "rpc_methods",
+    srcs = ["rpc_methods.py"],
+    visibility = ["//visibility:public"],
 )
 
 py_library(
     name = "spyne_mods",
     srcs = ["spyne_mods.py"],
     visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/tr069:spyne_mods"],
+    deps = [
+        "//lte/gateway/python/magma/enodebd:logger",
+        requirement("lxml"),
+    ],
 )

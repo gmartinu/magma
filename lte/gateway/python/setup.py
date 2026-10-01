@@ -56,6 +56,7 @@ setup(
         'magma.subscriberdb.store',
         'magma.subscriberdb.subscription',
         'magma.kernsnoopd',
+        'magma.tr069',
         'load_tests',
     ],
     scripts=[
