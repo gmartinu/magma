@@ -13,7 +13,7 @@ limitations under the License.
 from collections import namedtuple
 from typing import Any, List, Optional
 
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 Param = namedtuple('Param', ['name', 'val_type', 'data'])
 

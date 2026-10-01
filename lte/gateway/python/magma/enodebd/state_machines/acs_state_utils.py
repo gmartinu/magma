@@ -19,7 +19,7 @@ from magma.enodebd.device_config.enodeb_configuration import EnodebConfiguration
 from magma.enodebd.devices.device_utils import EnodebDeviceName, get_device_name
 from magma.enodebd.exceptions import ConfigurationError
 from magma.enodebd.logger import EnodebdLogger as logger
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 
 def process_inform_message(

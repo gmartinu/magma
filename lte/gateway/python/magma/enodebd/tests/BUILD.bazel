@@ -257,14 +257,6 @@ pytest_test(
 )
 
 pytest_test(
-    name = "spyne_mods_tests",
-    size = "small",
-    srcs = ["spyne_mods_tests.py"],
-    imports = [LTE_ROOT],
-    deps = ["//lte/gateway/python/magma/enodebd/tr069:models"],
-)
-
-pytest_test(
     name = "stats_manager_tests",
     size = "small",
     srcs = ["stats_manager_tests.py"],
@@ -293,6 +285,20 @@ pytest_test(
 )
 
 pytest_test(
+    name = "tr069_server_tests",
+    size = "small",
+    srcs = ["tr069_server_tests.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/enodebd:logger",
+        "//lte/gateway/python/magma/enodebd/tr069:server",
+    ],
+)
+
+pytest_test(
     name = "tr069_tests",
     size = "small",
     srcs = ["tr069_tests.py"],
@@ -302,7 +308,7 @@ pytest_test(
     ],
     deps = [
         "//lte/gateway/python/magma/enodebd/tests/test_utils:enb_acs_builder",
-        "//lte/gateway/python/magma/enodebd/tr069:rpc_methods",
+        "//lte/gateway/python/magma/tr069:rpc_methods",
         requirement("lxml"),
     ],
 )

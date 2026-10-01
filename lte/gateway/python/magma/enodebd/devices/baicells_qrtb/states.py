@@ -45,7 +45,7 @@ from magma.enodebd.state_machines.enb_acs_states import (
     WaitInformMRebootState,
 )
 from magma.enodebd.state_machines.timer import StateMachineTimer
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 logger = EnodebdLogger
 

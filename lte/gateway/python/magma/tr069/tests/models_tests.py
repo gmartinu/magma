@@ -12,7 +12,7 @@ limitations under the License.
 """
 import unittest
 
-from magma.enodebd.tr069.models import DeviceIdStruct
+from magma.tr069.models import DeviceIdStruct
 from spyne import ComplexModelBase
 
 

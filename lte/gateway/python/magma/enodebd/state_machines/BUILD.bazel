@@ -29,7 +29,7 @@ py_library(
     name = "acs_state_utils",
     srcs = ["acs_state_utils.py"],
     visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/enodebd/tr069:models"],
+    deps = ["//lte/gateway/python/magma/tr069:models"],
 )
 
 py_library(

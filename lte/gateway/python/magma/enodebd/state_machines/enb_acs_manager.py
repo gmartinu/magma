@@ -23,7 +23,7 @@ from magma.enodebd.state_machines.acs_state_utils import (
     get_device_name_from_inform,
 )
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 from spyne import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
 

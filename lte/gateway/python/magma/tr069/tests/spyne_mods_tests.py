@@ -13,8 +13,8 @@ limitations under the License.
 from datetime import datetime
 from unittest import TestCase
 
-from magma.enodebd.tr069 import models
-from magma.enodebd.tr069.spyne_mods import as_dict
+from magma.tr069 import models
+from magma.tr069.spyne_mods import as_dict
 
 
 class SpineModsTests(TestCase):
