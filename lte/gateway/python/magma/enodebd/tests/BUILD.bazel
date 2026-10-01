@@ -293,6 +293,20 @@ pytest_test(
 )
 
 pytest_test(
+    name = "tr069_server_tests",
+    size = "small",
+    srcs = ["tr069_server_tests.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/enodebd:logger",
+        "//lte/gateway/python/magma/enodebd/tr069:server",
+    ],
+)
+
+pytest_test(
     name = "tr069_tests",
     size = "small",
     srcs = ["tr069_tests.py"],

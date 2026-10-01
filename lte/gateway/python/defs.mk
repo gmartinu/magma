@@ -22,6 +22,7 @@ TESTS=magma/tests \
       magma/redirectd/tests \
       magma/subscriberdb/tests \
       magma/monitord/tests \
+      magma/tr069/tests \
       magma/kernsnoopd/tests
 
 SUDO_TESTS=magma/mobilityd/tests/test_ip_allocator_dhcp_e2e.py \
