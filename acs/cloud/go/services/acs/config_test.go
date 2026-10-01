@@ -23,6 +23,7 @@ import (
 
 	acs_service "magma/acs/cloud/go/services/acs"
 	"magma/acs/cloud/go/services/acs/auth"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/acs/cloud/go/services/acs/storage"
 )
 
@@ -90,4 +91,17 @@ func TestSealer(t *testing.T) {
 	s, err = acs_service.Config{}.Sealer()
 	require.NoError(t, err)
 	assert.NotNil(t, s)
+}
+
+func TestObservabilityConfig(t *testing.T) {
+	assert.NotNil(t, acs_service.Config{}.KPIReporter())
+	off := false
+	assert.Nil(t, acs_service.Config{PushKPIs: &off}.KPIReporter())
+	assert.Equal(t, 5*time.Minute, acs_service.Config{}.OnlineMetricsInterval())
+	assert.Equal(t, time.Minute, acs_service.Config{OnlineMetricsIntervalSec: 60}.OnlineMetricsInterval())
+
+	assert.IsType(t, &sessionlog.WriterSink{}, acs_service.Config{}.SessionLogSink())
+	sink := acs_service.Config{SessionLogURL: "http://fluentd:9888/acs"}.SessionLogSink()
+	require.IsType(t, &sessionlog.HTTPSink{}, sink)
+	sink.(*sessionlog.HTTPSink).Close()
 }
