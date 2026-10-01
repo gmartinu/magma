@@ -66,6 +66,14 @@ class ShippedConfigTest(unittest.TestCase):
         self.assertEqual(mconfig.mode, mconfigs_pb2.AcsD.ACTIVE)
         self.assertEqual(mconfig.port, 48081)
 
+    def test_off_by_default(self):
+        with open(os.path.join(CONFIG_DIR, 'magmad.yml')) as f:
+            magmad = yaml.safe_load(f)
+        self.assertIn('acsd', magmad['registered_dynamic_services'])
+        with open(os.path.join(CONFIG_DIR, 'gateway.mconfig')) as f:
+            dynamic = json.load(f)['configs_by_key']['magmad']['dynamic_services']
+        self.assertNotIn('acsd', dynamic)
+
 
 if __name__ == '__main__':
     unittest.main()
