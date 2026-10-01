@@ -469,6 +469,54 @@ func (ModeMapItem_FederatedMode) EnumDescriptor() ([]byte, []int) {
 	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{10, 0}
 }
 
+type AcsD_Mode int32
+
+const (
+	// Serve CPEs normally.
+	AcsD_ACTIVE AcsD_Mode = 0
+	// Reserved for entitlement: accept Informs but queue no new tasks.
+	AcsD_FROZEN AcsD_Mode = 1
+)
+
+// Enum value maps for AcsD_Mode.
+var (
+	AcsD_Mode_name = map[int32]string{
+		0: "ACTIVE",
+		1: "FROZEN",
+	}
+	AcsD_Mode_value = map[string]int32{
+		"ACTIVE": 0,
+		"FROZEN": 1,
+	}
+)
+
+func (x AcsD_Mode) Enum() *AcsD_Mode {
+	p := new(AcsD_Mode)
+	*p = x
+	return p
+}
+
+func (x AcsD_Mode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AcsD_Mode) Descriptor() protoreflect.EnumDescriptor {
+	return file_lte_protos_mconfig_mconfigs_proto_enumTypes[9].Descriptor()
+}
+
+func (AcsD_Mode) Type() protoreflect.EnumType {
+	return &file_lte_protos_mconfig_mconfigs_proto_enumTypes[9]
+}
+
+func (x AcsD_Mode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AcsD_Mode.Descriptor instead.
+func (AcsD_Mode) EnumDescriptor() ([]byte, []int) {
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{14, 0}
+}
+
 type AgwD_LogLevel int32
 
 const (
@@ -508,11 +556,11 @@ func (x AgwD_LogLevel) String() string {
 }
 
 func (AgwD_LogLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_lte_protos_mconfig_mconfigs_proto_enumTypes[9].Descriptor()
+	return file_lte_protos_mconfig_mconfigs_proto_enumTypes[10].Descriptor()
 }
 
 func (AgwD_LogLevel) Type() protoreflect.EnumType {
-	return &file_lte_protos_mconfig_mconfigs_proto_enumTypes[9]
+	return &file_lte_protos_mconfig_mconfigs_proto_enumTypes[10]
 }
 
 func (x AgwD_LogLevel) Number() protoreflect.EnumNumber {
@@ -521,7 +569,7 @@ func (x AgwD_LogLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgwD_LogLevel.Descriptor instead.
 func (AgwD_LogLevel) EnumDescriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{20, 0}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{21, 0}
 }
 
 // --------------------------------------------------------------------------
@@ -2100,6 +2148,83 @@ func (x *MonitorD) GetPollingInterval() int32 {
 }
 
 // ------------------------------------------------------------------------------
+// AcsD configs
+// ------------------------------------------------------------------------------
+// TR-069 ACS for the CPEs attached behind this gateway.
+type AcsD struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	LogLevel protos.LogLevel `protobuf:"varint,1,opt,name=log_level,json=logLevel,proto3,enum=magma.orc8r.LogLevel" json:"log_level,omitempty"`
+	Mode     AcsD_Mode       `protobuf:"varint,2,opt,name=mode,proto3,enum=magma.mconfig.AcsD_Mode" json:"mode,omitempty"`
+	// CWMP listener port on mtr0. 0 means use the port in acsd.yml.
+	Port int32 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	// PeriodicInformInterval pushed to CPEs, in seconds. 0 leaves the CPE value.
+	PeriodicInformInterval int32 `protobuf:"varint,4,opt,name=periodic_inform_interval,json=periodicInformInterval,proto3" json:"periodic_inform_interval,omitempty"`
+}
+
+func (x *AcsD) Reset() {
+	*x = AcsD{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[14]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AcsD) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcsD) ProtoMessage() {}
+
+func (x *AcsD) ProtoReflect() protoreflect.Message {
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[14]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcsD.ProtoReflect.Descriptor instead.
+func (*AcsD) Descriptor() ([]byte, []int) {
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AcsD) GetLogLevel() protos.LogLevel {
+	if x != nil {
+		return x.LogLevel
+	}
+	return protos.LogLevel(0)
+}
+
+func (x *AcsD) GetMode() AcsD_Mode {
+	if x != nil {
+		return x.Mode
+	}
+	return AcsD_ACTIVE
+}
+
+func (x *AcsD) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *AcsD) GetPeriodicInformInterval() int32 {
+	if x != nil {
+		return x.PeriodicInformInterval
+	}
+	return 0
+}
+
+// ------------------------------------------------------------------------------
 // DPID configs
 // ------------------------------------------------------------------------------
 type DPID struct {
@@ -2113,7 +2238,7 @@ type DPID struct {
 func (x *DPID) Reset() {
 	*x = DPID{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[14]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[15]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2126,7 +2251,7 @@ func (x *DPID) String() string {
 func (*DPID) ProtoMessage() {}
 
 func (x *DPID) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[14]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[15]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2139,7 +2264,7 @@ func (x *DPID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DPID.ProtoReflect.Descriptor instead.
 func (*DPID) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{14}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DPID) GetLogLevel() protos.LogLevel {
@@ -2163,7 +2288,7 @@ type ConnectionD struct {
 func (x *ConnectionD) Reset() {
 	*x = ConnectionD{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[15]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2176,7 +2301,7 @@ func (x *ConnectionD) String() string {
 func (*ConnectionD) ProtoMessage() {}
 
 func (x *ConnectionD) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[15]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2189,7 +2314,7 @@ func (x *ConnectionD) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionD.ProtoReflect.Descriptor instead.
 func (*ConnectionD) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{15}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ConnectionD) GetLogLevel() protos.LogLevel {
@@ -2214,7 +2339,7 @@ type LIAgentD struct {
 func (x *LIAgentD) Reset() {
 	*x = LIAgentD{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[16]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2227,7 +2352,7 @@ func (x *LIAgentD) String() string {
 func (*LIAgentD) ProtoMessage() {}
 
 func (x *LIAgentD) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[16]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2240,7 +2365,7 @@ func (x *LIAgentD) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIAgentD.ProtoReflect.Descriptor instead.
 func (*LIAgentD) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{16}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *LIAgentD) GetLogLevel() protos.LogLevel {
@@ -2273,7 +2398,7 @@ type NProbeTask struct {
 func (x *NProbeTask) Reset() {
 	*x = NProbeTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[17]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[18]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2286,7 +2411,7 @@ func (x *NProbeTask) String() string {
 func (*NProbeTask) ProtoMessage() {}
 
 func (x *NProbeTask) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[17]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[18]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2299,7 +2424,7 @@ func (x *NProbeTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NProbeTask.ProtoReflect.Descriptor instead.
 func (*NProbeTask) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{17}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NProbeTask) GetTaskId() string {
@@ -2362,7 +2487,7 @@ type DnsD struct {
 func (x *DnsD) Reset() {
 	*x = DnsD{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[18]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2375,7 +2500,7 @@ func (x *DnsD) String() string {
 func (*DnsD) ProtoMessage() {}
 
 func (x *DnsD) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[18]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2388,7 +2513,7 @@ func (x *DnsD) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DnsD.ProtoReflect.Descriptor instead.
 func (*DnsD) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{18}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DnsD) GetLogLevel() protos.LogLevel {
@@ -2440,7 +2565,7 @@ type GatewayDNSConfigRecordsItems struct {
 func (x *GatewayDNSConfigRecordsItems) Reset() {
 	*x = GatewayDNSConfigRecordsItems{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[19]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[20]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2453,7 +2578,7 @@ func (x *GatewayDNSConfigRecordsItems) String() string {
 func (*GatewayDNSConfigRecordsItems) ProtoMessage() {}
 
 func (x *GatewayDNSConfigRecordsItems) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[19]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[20]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2466,7 +2591,7 @@ func (x *GatewayDNSConfigRecordsItems) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatewayDNSConfigRecordsItems.ProtoReflect.Descriptor instead.
 func (*GatewayDNSConfigRecordsItems) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{19}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GatewayDNSConfigRecordsItems) GetARecord() []string {
@@ -2519,7 +2644,7 @@ type AgwD struct {
 func (x *AgwD) Reset() {
 	*x = AgwD{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[20]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2532,7 +2657,7 @@ func (x *AgwD) String() string {
 func (*AgwD) ProtoMessage() {}
 
 func (x *AgwD) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[20]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2545,7 +2670,7 @@ func (x *AgwD) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgwD.ProtoReflect.Descriptor instead.
 func (*AgwD) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{20}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AgwD) GetLogLevel() AgwD_LogLevel {
@@ -2604,7 +2729,7 @@ type SctpD struct {
 func (x *SctpD) Reset() {
 	*x = SctpD{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[21]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2617,7 +2742,7 @@ func (x *SctpD) String() string {
 func (*SctpD) ProtoMessage() {}
 
 func (x *SctpD) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[21]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2630,7 +2755,7 @@ func (x *SctpD) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SctpD.ProtoReflect.Descriptor instead.
 func (*SctpD) Descriptor() ([]byte, []int) {
-	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{21}
+	return file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SctpD) GetLogLevel() protos.LogLevel {
@@ -2652,7 +2777,7 @@ type EnodebD_FDDConfig struct {
 func (x *EnodebD_FDDConfig) Reset() {
 	*x = EnodebD_FDDConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[22]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2665,7 +2790,7 @@ func (x *EnodebD_FDDConfig) String() string {
 func (*EnodebD_FDDConfig) ProtoMessage() {}
 
 func (x *EnodebD_FDDConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[22]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2710,7 +2835,7 @@ type EnodebD_TDDConfig struct {
 func (x *EnodebD_TDDConfig) Reset() {
 	*x = EnodebD_TDDConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[23]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2723,7 +2848,7 @@ func (x *EnodebD_TDDConfig) String() string {
 func (*EnodebD_TDDConfig) ProtoMessage() {}
 
 func (x *EnodebD_TDDConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[23]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2782,7 +2907,7 @@ type EnodebD_EnodebConfig struct {
 func (x *EnodebD_EnodebConfig) Reset() {
 	*x = EnodebD_EnodebConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[24]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2795,7 +2920,7 @@ func (x *EnodebD_EnodebConfig) String() string {
 func (*EnodebD_EnodebConfig) ProtoMessage() {}
 
 func (x *EnodebD_EnodebConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[24]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2893,7 +3018,7 @@ type PipelineD_AllowedGrePeer struct {
 func (x *PipelineD_AllowedGrePeer) Reset() {
 	*x = PipelineD_AllowedGrePeer{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[26]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2906,7 +3031,7 @@ func (x *PipelineD_AllowedGrePeer) String() string {
 func (*PipelineD_AllowedGrePeer) ProtoMessage() {}
 
 func (x *PipelineD_AllowedGrePeer) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[26]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2948,7 +3073,7 @@ type PipelineD_IPDRExportDst struct {
 func (x *PipelineD_IPDRExportDst) Reset() {
 	*x = PipelineD_IPDRExportDst{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[27]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[28]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2961,7 +3086,7 @@ func (x *PipelineD_IPDRExportDst) String() string {
 func (*PipelineD_IPDRExportDst) ProtoMessage() {}
 
 func (x *PipelineD_IPDRExportDst) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[27]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[28]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3006,7 +3131,7 @@ type PipelineD_LiUes struct {
 func (x *PipelineD_LiUes) Reset() {
 	*x = PipelineD_LiUes{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[28]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[29]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3019,7 +3144,7 @@ func (x *PipelineD_LiUes) String() string {
 func (*PipelineD_LiUes) ProtoMessage() {}
 
 func (x *PipelineD_LiUes) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[28]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[29]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3090,7 +3215,7 @@ type PipelineD_HEConfig struct {
 func (x *PipelineD_HEConfig) Reset() {
 	*x = PipelineD_HEConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[29]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3103,7 +3228,7 @@ func (x *PipelineD_HEConfig) String() string {
 func (*PipelineD_HEConfig) ProtoMessage() {}
 
 func (x *PipelineD_HEConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[29]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[30]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3180,7 +3305,7 @@ type MME_ApnCorrectionMap struct {
 func (x *MME_ApnCorrectionMap) Reset() {
 	*x = MME_ApnCorrectionMap{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[30]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[31]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3193,7 +3318,7 @@ func (x *MME_ApnCorrectionMap) String() string {
 func (*MME_ApnCorrectionMap) ProtoMessage() {}
 
 func (x *MME_ApnCorrectionMap) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[30]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[31]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3236,7 +3361,7 @@ type MME_PlmnConfig struct {
 func (x *MME_PlmnConfig) Reset() {
 	*x = MME_PlmnConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[31]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[32]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3249,7 +3374,7 @@ func (x *MME_PlmnConfig) String() string {
 func (*MME_PlmnConfig) ProtoMessage() {}
 
 func (x *MME_PlmnConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[31]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[32]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3290,7 +3415,7 @@ type MME_TacList struct {
 func (x *MME_TacList) Reset() {
 	*x = MME_TacList{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[32]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[33]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3303,7 +3428,7 @@ func (x *MME_TacList) String() string {
 func (*MME_TacList) ProtoMessage() {}
 
 func (x *MME_TacList) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[32]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[33]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3339,7 +3464,7 @@ type MME_ImeiConfig struct {
 func (x *MME_ImeiConfig) Reset() {
 	*x = MME_ImeiConfig{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[34]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[35]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3352,7 +3477,7 @@ func (x *MME_ImeiConfig) String() string {
 func (*MME_ImeiConfig) ProtoMessage() {}
 
 func (x *MME_ImeiConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[34]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[35]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3396,7 +3521,7 @@ type SubscriberDB_SubscriptionProfile struct {
 func (x *SubscriberDB_SubscriptionProfile) Reset() {
 	*x = SubscriberDB_SubscriptionProfile{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[35]
+		mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[36]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3409,7 +3534,7 @@ func (x *SubscriberDB_SubscriptionProfile) String() string {
 func (*SubscriberDB_SubscriptionProfile) ProtoMessage() {}
 
 func (x *SubscriberDB_SubscriptionProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[35]
+	mi := &file_lte_protos_mconfig_mconfigs_proto_msgTypes[36]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3952,96 +4077,109 @@ var file_lte_protos_mconfig_mconfigs_proto_rawDesc = []byte{
 	0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12,
 	0x29, 0x0a, 0x10, 0x70, 0x6f, 0x6c, 0x6c, 0x69, 0x6e, 0x67, 0x5f, 0x69, 0x6e, 0x74, 0x65, 0x72,
 	0x76, 0x61, 0x6c, 0x18, 0x3c, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0f, 0x70, 0x6f, 0x6c, 0x6c, 0x69,
-	0x6e, 0x67, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x76, 0x61, 0x6c, 0x22, 0x3a, 0x0a, 0x04, 0x44, 0x50,
-	0x49, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72,
-	0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f,
-	0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x22, 0x41, 0x0a, 0x0b, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63,
-	0x74, 0x69, 0x6f, 0x6e, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76,
-	0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61,
-	0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52,
-	0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x22, 0x7c, 0x0a, 0x08, 0x4c, 0x49, 0x41,
-	0x67, 0x65, 0x6e, 0x74, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76,
-	0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61,
-	0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52,
-	0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x3c, 0x0a, 0x0c, 0x6e, 0x70, 0x72,
-	0x6f, 0x62, 0x65, 0x5f, 0x74, 0x61, 0x73, 0x6b, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32,
-	0x19, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e,
-	0x4e, 0x50, 0x72, 0x6f, 0x62, 0x65, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x0b, 0x6e, 0x70, 0x72, 0x6f,
-	0x62, 0x65, 0x54, 0x61, 0x73, 0x6b, 0x73, 0x22, 0xcc, 0x01, 0x0a, 0x0a, 0x4e, 0x50, 0x72, 0x6f,
-	0x62, 0x65, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69,
-	0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12,
-	0x1b, 0x0a, 0x09, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x09, 0x52, 0x08, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x49, 0x64, 0x12, 0x1f, 0x0a, 0x0b,
-	0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x0a, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x23, 0x0a,
-	0x0d, 0x64, 0x65, 0x6c, 0x69, 0x76, 0x65, 0x72, 0x79, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x04,
-	0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x64, 0x65, 0x6c, 0x69, 0x76, 0x65, 0x72, 0x79, 0x54, 0x79,
-	0x70, 0x65, 0x12, 0x25, 0x0a, 0x0e, 0x63, 0x6f, 0x72, 0x72, 0x65, 0x6c, 0x61, 0x74, 0x69, 0x6f,
-	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x05, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0d, 0x63, 0x6f, 0x72, 0x72,
-	0x65, 0x6c, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x64, 0x6f, 0x6d,
-	0x61, 0x69, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x64, 0x6f,
-	0x6d, 0x61, 0x69, 0x6e, 0x49, 0x64, 0x22, 0xf4, 0x01, 0x0a, 0x04, 0x44, 0x6e, 0x73, 0x44, 0x12,
-	0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72,
-	0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65,
-	0x76, 0x65, 0x6c, 0x12, 0x25, 0x0a, 0x0e, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x63, 0x61,
-	0x63, 0x68, 0x69, 0x6e, 0x67, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x65, 0x6e, 0x61,
-	0x62, 0x6c, 0x65, 0x43, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x67, 0x12, 0x1a, 0x0a, 0x08, 0x6c, 0x6f,
-	0x63, 0x61, 0x6c, 0x54, 0x54, 0x4c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x08, 0x6c, 0x6f,
-	0x63, 0x61, 0x6c, 0x54, 0x54, 0x4c, 0x12, 0x45, 0x0a, 0x07, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64,
-	0x73, 0x18, 0x04, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2b, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e,
-	0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x47, 0x61, 0x74, 0x65, 0x77, 0x61, 0x79, 0x44,
-	0x4e, 0x53, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x49,
-	0x74, 0x65, 0x6d, 0x73, 0x52, 0x07, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x12, 0x2e, 0x0a,
-	0x13, 0x64, 0x68, 0x63, 0x70, 0x5f, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x5f, 0x65, 0x6e, 0x61,
-	0x62, 0x6c, 0x65, 0x64, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x11, 0x64, 0x68, 0x63, 0x70,
-	0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x45, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x64, 0x22, 0x95, 0x01,
-	0x0a, 0x1c, 0x47, 0x61, 0x74, 0x65, 0x77, 0x61, 0x79, 0x44, 0x4e, 0x53, 0x43, 0x6f, 0x6e, 0x66,
-	0x69, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x12, 0x19,
-	0x0a, 0x08, 0x61, 0x5f, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x18, 0x01, 0x20, 0x03, 0x28, 0x09,
-	0x52, 0x07, 0x61, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x12, 0x1f, 0x0a, 0x0b, 0x61, 0x61, 0x61,
-	0x61, 0x5f, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0a,
-	0x61, 0x61, 0x61, 0x61, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x12, 0x21, 0x0a, 0x0c, 0x63, 0x6e,
-	0x61, 0x6d, 0x65, 0x5f, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x18, 0x03, 0x20, 0x03, 0x28, 0x09,
-	0x52, 0x0b, 0x63, 0x6e, 0x61, 0x6d, 0x65, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x12, 0x16, 0x0a,
-	0x06, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x64,
-	0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x22, 0xc3, 0x03, 0x0a, 0x04, 0x41, 0x67, 0x77, 0x44, 0x12, 0x39,
+	0x6e, 0x67, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x76, 0x61, 0x6c, 0x22, 0xd6, 0x01, 0x0a, 0x04, 0x41,
+	0x63, 0x73, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f,
+	0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c,
+	0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x2c, 0x0a, 0x04, 0x6d, 0x6f, 0x64, 0x65, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x18, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6d, 0x63,
+	0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x41, 0x63, 0x73, 0x44, 0x2e, 0x4d, 0x6f, 0x64, 0x65, 0x52,
+	0x04, 0x6d, 0x6f, 0x64, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x70, 0x6f, 0x72, 0x74, 0x18, 0x03, 0x20,
+	0x01, 0x28, 0x05, 0x52, 0x04, 0x70, 0x6f, 0x72, 0x74, 0x12, 0x38, 0x0a, 0x18, 0x70, 0x65, 0x72,
+	0x69, 0x6f, 0x64, 0x69, 0x63, 0x5f, 0x69, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x69, 0x6e, 0x74,
+	0x65, 0x72, 0x76, 0x61, 0x6c, 0x18, 0x04, 0x20, 0x01, 0x28, 0x05, 0x52, 0x16, 0x70, 0x65, 0x72,
+	0x69, 0x6f, 0x64, 0x69, 0x63, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x49, 0x6e, 0x74, 0x65, 0x72,
+	0x76, 0x61, 0x6c, 0x22, 0x1e, 0x0a, 0x04, 0x4d, 0x6f, 0x64, 0x65, 0x12, 0x0a, 0x0a, 0x06, 0x41,
+	0x43, 0x54, 0x49, 0x56, 0x45, 0x10, 0x00, 0x12, 0x0a, 0x0a, 0x06, 0x46, 0x52, 0x4f, 0x5a, 0x45,
+	0x4e, 0x10, 0x01, 0x22, 0x3a, 0x0a, 0x04, 0x44, 0x50, 0x49, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c,
+	0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15,
+	0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67,
+	0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x22,
+	0x41, 0x0a, 0x0b, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x44, 0x12, 0x32,
 	0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28,
-	0x0e, 0x32, 0x1c, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69,
-	0x67, 0x2e, 0x41, 0x67, 0x77, 0x44, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52,
-	0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x45, 0x0a, 0x1f, 0x73, 0x63, 0x74,
-	0x70, 0x64, 0x5f, 0x64, 0x6f, 0x77, 0x6e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65,
-	0x72, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x09, 0x52, 0x1c, 0x73, 0x63, 0x74, 0x70, 0x64, 0x44, 0x6f, 0x77, 0x6e, 0x73, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74,
-	0x12, 0x41, 0x0a, 0x1d, 0x73, 0x63, 0x74, 0x70, 0x64, 0x5f, 0x75, 0x70, 0x73, 0x74, 0x72, 0x65,
-	0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72, 0x67, 0x65,
-	0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x1a, 0x73, 0x63, 0x74, 0x70, 0x64, 0x55, 0x70,
-	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72,
-	0x67, 0x65, 0x74, 0x12, 0x4c, 0x0a, 0x23, 0x6d, 0x6d, 0x65, 0x5f, 0x73, 0x63, 0x74, 0x70, 0x64,
-	0x5f, 0x64, 0x6f, 0x77, 0x6e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76,
-	0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09,
-	0x52, 0x1f, 0x6d, 0x6d, 0x65, 0x53, 0x63, 0x74, 0x70, 0x64, 0x44, 0x6f, 0x77, 0x6e, 0x73, 0x74,
-	0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65,
-	0x74, 0x12, 0x48, 0x0a, 0x21, 0x6d, 0x6d, 0x65, 0x5f, 0x73, 0x63, 0x74, 0x70, 0x64, 0x5f, 0x75,
-	0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5f,
-	0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x1d, 0x6d, 0x6d,
-	0x65, 0x53, 0x63, 0x74, 0x70, 0x64, 0x55, 0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65,
-	0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x73,
-	0x65, 0x6e, 0x74, 0x72, 0x79, 0x5f, 0x64, 0x73, 0x6e, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52,
-	0x09, 0x73, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x44, 0x73, 0x6e, 0x22, 0x3f, 0x0a, 0x08, 0x4c, 0x6f,
-	0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x09, 0x0a, 0x05, 0x55, 0x4e, 0x53, 0x45, 0x54, 0x10,
-	0x00, 0x12, 0x09, 0x0a, 0x05, 0x44, 0x45, 0x42, 0x55, 0x47, 0x10, 0x01, 0x12, 0x08, 0x0a, 0x04,
-	0x49, 0x4e, 0x46, 0x4f, 0x10, 0x02, 0x12, 0x08, 0x0a, 0x04, 0x57, 0x41, 0x52, 0x4e, 0x10, 0x03,
-	0x12, 0x09, 0x0a, 0x05, 0x45, 0x52, 0x52, 0x4f, 0x52, 0x10, 0x04, 0x22, 0x3b, 0x0a, 0x05, 0x53,
-	0x63, 0x74, 0x70, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65,
-	0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e,
-	0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08,
-	0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x42, 0x23, 0x5a, 0x21, 0x6d, 0x61, 0x67, 0x6d,
-	0x61, 0x2f, 0x6c, 0x74, 0x65, 0x2f, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2f, 0x67, 0x6f, 0x2f, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e,
+	0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76,
+	0x65, 0x6c, 0x22, 0x7c, 0x0a, 0x08, 0x4c, 0x49, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x44, 0x12, 0x32,
+	0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e,
+	0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76,
+	0x65, 0x6c, 0x12, 0x3c, 0x0a, 0x0c, 0x6e, 0x70, 0x72, 0x6f, 0x62, 0x65, 0x5f, 0x74, 0x61, 0x73,
+	0x6b, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x19, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61,
+	0x2e, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x4e, 0x50, 0x72, 0x6f, 0x62, 0x65, 0x54,
+	0x61, 0x73, 0x6b, 0x52, 0x0b, 0x6e, 0x70, 0x72, 0x6f, 0x62, 0x65, 0x54, 0x61, 0x73, 0x6b, 0x73,
+	0x22, 0xcc, 0x01, 0x0a, 0x0a, 0x4e, 0x50, 0x72, 0x6f, 0x62, 0x65, 0x54, 0x61, 0x73, 0x6b, 0x12,
+	0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x72, 0x67,
+	0x65, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x74, 0x61, 0x72,
+	0x67, 0x65, 0x74, 0x49, 0x64, 0x12, 0x1f, 0x0a, 0x0b, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x5f,
+	0x74, 0x79, 0x70, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x74, 0x61, 0x72, 0x67,
+	0x65, 0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x64, 0x65, 0x6c, 0x69, 0x76, 0x65,
+	0x72, 0x79, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x64,
+	0x65, 0x6c, 0x69, 0x76, 0x65, 0x72, 0x79, 0x54, 0x79, 0x70, 0x65, 0x12, 0x25, 0x0a, 0x0e, 0x63,
+	0x6f, 0x72, 0x72, 0x65, 0x6c, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x04, 0x52, 0x0d, 0x63, 0x6f, 0x72, 0x72, 0x65, 0x6c, 0x61, 0x74, 0x69, 0x6f, 0x6e,
+	0x49, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x5f, 0x69, 0x64, 0x18,
+	0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x49, 0x64, 0x22,
+	0xf4, 0x01, 0x0a, 0x04, 0x44, 0x6e, 0x73, 0x44, 0x12, 0x32, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f,
+	0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x15, 0x2e, 0x6d, 0x61,
+	0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76,
+	0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x25, 0x0a, 0x0e,
+	0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x63, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x67, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x43, 0x61, 0x63, 0x68,
+	0x69, 0x6e, 0x67, 0x12, 0x1a, 0x0a, 0x08, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x54, 0x4c, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x08, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x54, 0x4c, 0x12,
+	0x45, 0x0a, 0x07, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x18, 0x04, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x2b, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67,
+	0x2e, 0x47, 0x61, 0x74, 0x65, 0x77, 0x61, 0x79, 0x44, 0x4e, 0x53, 0x43, 0x6f, 0x6e, 0x66, 0x69,
+	0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x52, 0x07, 0x72,
+	0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x12, 0x2e, 0x0a, 0x13, 0x64, 0x68, 0x63, 0x70, 0x5f, 0x73,
+	0x65, 0x72, 0x76, 0x65, 0x72, 0x5f, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x64, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x08, 0x52, 0x11, 0x64, 0x68, 0x63, 0x70, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x45,
+	0x6e, 0x61, 0x62, 0x6c, 0x65, 0x64, 0x22, 0x95, 0x01, 0x0a, 0x1c, 0x47, 0x61, 0x74, 0x65, 0x77,
+	0x61, 0x79, 0x44, 0x4e, 0x53, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72,
+	0x64, 0x73, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x12, 0x19, 0x0a, 0x08, 0x61, 0x5f, 0x72, 0x65, 0x63,
+	0x6f, 0x72, 0x64, 0x18, 0x01, 0x20, 0x03, 0x28, 0x09, 0x52, 0x07, 0x61, 0x52, 0x65, 0x63, 0x6f,
+	0x72, 0x64, 0x12, 0x1f, 0x0a, 0x0b, 0x61, 0x61, 0x61, 0x61, 0x5f, 0x72, 0x65, 0x63, 0x6f, 0x72,
+	0x64, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0a, 0x61, 0x61, 0x61, 0x61, 0x52, 0x65, 0x63,
+	0x6f, 0x72, 0x64, 0x12, 0x21, 0x0a, 0x0c, 0x63, 0x6e, 0x61, 0x6d, 0x65, 0x5f, 0x72, 0x65, 0x63,
+	0x6f, 0x72, 0x64, 0x18, 0x03, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0b, 0x63, 0x6e, 0x61, 0x6d, 0x65,
+	0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x12, 0x16, 0x0a, 0x06, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e,
+	0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x22, 0xc3,
+	0x03, 0x0a, 0x04, 0x41, 0x67, 0x77, 0x44, 0x12, 0x39, 0x0a, 0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c,
+	0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x1c, 0x2e, 0x6d, 0x61, 0x67,
+	0x6d, 0x61, 0x2e, 0x6d, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x41, 0x67, 0x77, 0x44, 0x2e,
+	0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76,
+	0x65, 0x6c, 0x12, 0x45, 0x0a, 0x1f, 0x73, 0x63, 0x74, 0x70, 0x64, 0x5f, 0x64, 0x6f, 0x77, 0x6e,
+	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x74,
+	0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x1c, 0x73, 0x63, 0x74,
+	0x70, 0x64, 0x44, 0x6f, 0x77, 0x6e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x72, 0x76,
+	0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12, 0x41, 0x0a, 0x1d, 0x73, 0x63, 0x74,
+	0x70, 0x64, 0x5f, 0x75, 0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76,
+	0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x1a, 0x73, 0x63, 0x74, 0x70, 0x64, 0x55, 0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53,
+	0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12, 0x4c, 0x0a, 0x23,
+	0x6d, 0x6d, 0x65, 0x5f, 0x73, 0x63, 0x74, 0x70, 0x64, 0x5f, 0x64, 0x6f, 0x77, 0x6e, 0x73, 0x74,
+	0x72, 0x65, 0x61, 0x6d, 0x5f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72,
+	0x67, 0x65, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x1f, 0x6d, 0x6d, 0x65, 0x53, 0x63,
+	0x74, 0x70, 0x64, 0x44, 0x6f, 0x77, 0x6e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x72,
+	0x76, 0x69, 0x63, 0x65, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12, 0x48, 0x0a, 0x21, 0x6d, 0x6d,
+	0x65, 0x5f, 0x73, 0x63, 0x74, 0x70, 0x64, 0x5f, 0x75, 0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+	0x5f, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18,
+	0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x1d, 0x6d, 0x6d, 0x65, 0x53, 0x63, 0x74, 0x70, 0x64, 0x55,
+	0x70, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x54, 0x61,
+	0x72, 0x67, 0x65, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x73, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x5f, 0x64,
+	0x73, 0x6e, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x73, 0x65, 0x6e, 0x74, 0x72, 0x79,
+	0x44, 0x73, 0x6e, 0x22, 0x3f, 0x0a, 0x08, 0x4c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12,
+	0x09, 0x0a, 0x05, 0x55, 0x4e, 0x53, 0x45, 0x54, 0x10, 0x00, 0x12, 0x09, 0x0a, 0x05, 0x44, 0x45,
+	0x42, 0x55, 0x47, 0x10, 0x01, 0x12, 0x08, 0x0a, 0x04, 0x49, 0x4e, 0x46, 0x4f, 0x10, 0x02, 0x12,
+	0x08, 0x0a, 0x04, 0x57, 0x41, 0x52, 0x4e, 0x10, 0x03, 0x12, 0x09, 0x0a, 0x05, 0x45, 0x52, 0x52,
+	0x4f, 0x52, 0x10, 0x04, 0x22, 0x3b, 0x0a, 0x05, 0x53, 0x63, 0x74, 0x70, 0x44, 0x12, 0x32, 0x0a,
+	0x09, 0x6c, 0x6f, 0x67, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e,
+	0x32, 0x15, 0x2e, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2e, 0x6f, 0x72, 0x63, 0x38, 0x72, 0x2e, 0x4c,
+	0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x52, 0x08, 0x6c, 0x6f, 0x67, 0x4c, 0x65, 0x76, 0x65,
+	0x6c, 0x42, 0x23, 0x5a, 0x21, 0x6d, 0x61, 0x67, 0x6d, 0x61, 0x2f, 0x6c, 0x74, 0x65, 0x2f, 0x63,
+	0x6c, 0x6f, 0x75, 0x64, 0x2f, 0x67, 0x6f, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x6d,
+	0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -4056,8 +4194,8 @@ func file_lte_protos_mconfig_mconfigs_proto_rawDescGZIP() []byte {
 	return file_lte_protos_mconfig_mconfigs_proto_rawDescData
 }
 
-var file_lte_protos_mconfig_mconfigs_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
-var file_lte_protos_mconfig_mconfigs_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_lte_protos_mconfig_mconfigs_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
+var file_lte_protos_mconfig_mconfigs_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_lte_protos_mconfig_mconfigs_proto_goTypes = []interface{}{
 	(EnodebD_CSFBRat)(0),                        // 0: magma.mconfig.EnodebD.CSFBRat
 	(PipelineD_NetworkServices)(0),              // 1: magma.mconfig.PipelineD.NetworkServices
@@ -4068,99 +4206,103 @@ var file_lte_protos_mconfig_mconfigs_proto_goTypes = []interface{}{
 	(MobilityD_IpAllocatorType)(0),              // 6: magma.mconfig.MobilityD.IpAllocatorType
 	(MME_NonEPSServiceControl)(0),               // 7: magma.mconfig.MME.NonEPSServiceControl
 	(ModeMapItem_FederatedMode)(0),              // 8: magma.mconfig.ModeMapItem.FederatedMode
-	(AgwD_LogLevel)(0),                          // 9: magma.mconfig.AgwD.LogLevel
-	(*SentryConfig)(nil),                        // 10: magma.mconfig.SentryConfig
-	(*EnodebD)(nil),                             // 11: magma.mconfig.EnodebD
-	(*PipelineD)(nil),                           // 12: magma.mconfig.PipelineD
-	(*SessionD)(nil),                            // 13: magma.mconfig.SessionD
-	(*WalletExhaustDetection)(nil),              // 14: magma.mconfig.WalletExhaustDetection
-	(*PolicyDB)(nil),                            // 15: magma.mconfig.PolicyDB
-	(*RedirectD)(nil),                           // 16: magma.mconfig.RedirectD
-	(*MobilityD)(nil),                           // 17: magma.mconfig.MobilityD
-	(*MME)(nil),                                 // 18: magma.mconfig.MME
-	(*FederatedModeMap)(nil),                    // 19: magma.mconfig.FederatedModeMap
-	(*ModeMapItem)(nil),                         // 20: magma.mconfig.ModeMapItem
-	(*SubscriberDB)(nil),                        // 21: magma.mconfig.SubscriberDB
-	(*LighttpD)(nil),                            // 22: magma.mconfig.LighttpD
-	(*MonitorD)(nil),                            // 23: magma.mconfig.MonitorD
-	(*DPID)(nil),                                // 24: magma.mconfig.DPID
-	(*ConnectionD)(nil),                         // 25: magma.mconfig.ConnectionD
-	(*LIAgentD)(nil),                            // 26: magma.mconfig.LIAgentD
-	(*NProbeTask)(nil),                          // 27: magma.mconfig.NProbeTask
-	(*DnsD)(nil),                                // 28: magma.mconfig.DnsD
-	(*GatewayDNSConfigRecordsItems)(nil),        // 29: magma.mconfig.GatewayDNSConfigRecordsItems
-	(*AgwD)(nil),                                // 30: magma.mconfig.AgwD
-	(*SctpD)(nil),                               // 31: magma.mconfig.SctpD
-	(*EnodebD_FDDConfig)(nil),                   // 32: magma.mconfig.EnodebD.FDDConfig
-	(*EnodebD_TDDConfig)(nil),                   // 33: magma.mconfig.EnodebD.TDDConfig
-	(*EnodebD_EnodebConfig)(nil),                // 34: magma.mconfig.EnodebD.EnodebConfig
-	nil,                                         // 35: magma.mconfig.EnodebD.EnbConfigsBySerialEntry
-	(*PipelineD_AllowedGrePeer)(nil),            // 36: magma.mconfig.PipelineD.AllowedGrePeer
-	(*PipelineD_IPDRExportDst)(nil),             // 37: magma.mconfig.PipelineD.IPDRExportDst
-	(*PipelineD_LiUes)(nil),                     // 38: magma.mconfig.PipelineD.LiUes
-	(*PipelineD_HEConfig)(nil),                  // 39: magma.mconfig.PipelineD.HEConfig
-	(*MME_ApnCorrectionMap)(nil),                // 40: magma.mconfig.MME.ApnCorrectionMap
-	(*MME_PlmnConfig)(nil),                      // 41: magma.mconfig.MME.PlmnConfig
-	(*MME_TacList)(nil),                         // 42: magma.mconfig.MME.TacList
-	nil,                                         // 43: magma.mconfig.MME.ServiceAreaMapsEntry
-	(*MME_ImeiConfig)(nil),                      // 44: magma.mconfig.MME.ImeiConfig
-	(*SubscriberDB_SubscriptionProfile)(nil),    // 45: magma.mconfig.SubscriberDB.SubscriptionProfile
-	nil,                                         // 46: magma.mconfig.SubscriberDB.SubProfilesEntry
-	(protos.LogLevel)(0),                        // 47: magma.orc8r.LogLevel
+	(AcsD_Mode)(0),                              // 9: magma.mconfig.AcsD.Mode
+	(AgwD_LogLevel)(0),                          // 10: magma.mconfig.AgwD.LogLevel
+	(*SentryConfig)(nil),                        // 11: magma.mconfig.SentryConfig
+	(*EnodebD)(nil),                             // 12: magma.mconfig.EnodebD
+	(*PipelineD)(nil),                           // 13: magma.mconfig.PipelineD
+	(*SessionD)(nil),                            // 14: magma.mconfig.SessionD
+	(*WalletExhaustDetection)(nil),              // 15: magma.mconfig.WalletExhaustDetection
+	(*PolicyDB)(nil),                            // 16: magma.mconfig.PolicyDB
+	(*RedirectD)(nil),                           // 17: magma.mconfig.RedirectD
+	(*MobilityD)(nil),                           // 18: magma.mconfig.MobilityD
+	(*MME)(nil),                                 // 19: magma.mconfig.MME
+	(*FederatedModeMap)(nil),                    // 20: magma.mconfig.FederatedModeMap
+	(*ModeMapItem)(nil),                         // 21: magma.mconfig.ModeMapItem
+	(*SubscriberDB)(nil),                        // 22: magma.mconfig.SubscriberDB
+	(*LighttpD)(nil),                            // 23: magma.mconfig.LighttpD
+	(*MonitorD)(nil),                            // 24: magma.mconfig.MonitorD
+	(*AcsD)(nil),                                // 25: magma.mconfig.AcsD
+	(*DPID)(nil),                                // 26: magma.mconfig.DPID
+	(*ConnectionD)(nil),                         // 27: magma.mconfig.ConnectionD
+	(*LIAgentD)(nil),                            // 28: magma.mconfig.LIAgentD
+	(*NProbeTask)(nil),                          // 29: magma.mconfig.NProbeTask
+	(*DnsD)(nil),                                // 30: magma.mconfig.DnsD
+	(*GatewayDNSConfigRecordsItems)(nil),        // 31: magma.mconfig.GatewayDNSConfigRecordsItems
+	(*AgwD)(nil),                                // 32: magma.mconfig.AgwD
+	(*SctpD)(nil),                               // 33: magma.mconfig.SctpD
+	(*EnodebD_FDDConfig)(nil),                   // 34: magma.mconfig.EnodebD.FDDConfig
+	(*EnodebD_TDDConfig)(nil),                   // 35: magma.mconfig.EnodebD.TDDConfig
+	(*EnodebD_EnodebConfig)(nil),                // 36: magma.mconfig.EnodebD.EnodebConfig
+	nil,                                         // 37: magma.mconfig.EnodebD.EnbConfigsBySerialEntry
+	(*PipelineD_AllowedGrePeer)(nil),            // 38: magma.mconfig.PipelineD.AllowedGrePeer
+	(*PipelineD_IPDRExportDst)(nil),             // 39: magma.mconfig.PipelineD.IPDRExportDst
+	(*PipelineD_LiUes)(nil),                     // 40: magma.mconfig.PipelineD.LiUes
+	(*PipelineD_HEConfig)(nil),                  // 41: magma.mconfig.PipelineD.HEConfig
+	(*MME_ApnCorrectionMap)(nil),                // 42: magma.mconfig.MME.ApnCorrectionMap
+	(*MME_PlmnConfig)(nil),                      // 43: magma.mconfig.MME.PlmnConfig
+	(*MME_TacList)(nil),                         // 44: magma.mconfig.MME.TacList
+	nil,                                         // 45: magma.mconfig.MME.ServiceAreaMapsEntry
+	(*MME_ImeiConfig)(nil),                      // 46: magma.mconfig.MME.ImeiConfig
+	(*SubscriberDB_SubscriptionProfile)(nil),    // 47: magma.mconfig.SubscriberDB.SubscriptionProfile
+	nil,                                         // 48: magma.mconfig.SubscriberDB.SubProfilesEntry
+	(protos.LogLevel)(0),                        // 49: magma.orc8r.LogLevel
 }
 var file_lte_protos_mconfig_mconfigs_proto_depIdxs = []int32{
-	47, // 0: magma.mconfig.EnodebD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 0: magma.mconfig.EnodebD.log_level:type_name -> magma.orc8r.LogLevel
 	0,  // 1: magma.mconfig.EnodebD.csfb_rat:type_name -> magma.mconfig.EnodebD.CSFBRat
-	33, // 2: magma.mconfig.EnodebD.tdd_config:type_name -> magma.mconfig.EnodebD.TDDConfig
-	32, // 3: magma.mconfig.EnodebD.fdd_config:type_name -> magma.mconfig.EnodebD.FDDConfig
-	35, // 4: magma.mconfig.EnodebD.enb_configs_by_serial:type_name -> magma.mconfig.EnodebD.EnbConfigsBySerialEntry
-	47, // 5: magma.mconfig.PipelineD.log_level:type_name -> magma.orc8r.LogLevel
+	35, // 2: magma.mconfig.EnodebD.tdd_config:type_name -> magma.mconfig.EnodebD.TDDConfig
+	34, // 3: magma.mconfig.EnodebD.fdd_config:type_name -> magma.mconfig.EnodebD.FDDConfig
+	37, // 4: magma.mconfig.EnodebD.enb_configs_by_serial:type_name -> magma.mconfig.EnodebD.EnbConfigsBySerialEntry
+	49, // 5: magma.mconfig.PipelineD.log_level:type_name -> magma.orc8r.LogLevel
 	1,  // 6: magma.mconfig.PipelineD.services:type_name -> magma.mconfig.PipelineD.NetworkServices
-	36, // 7: magma.mconfig.PipelineD.allowed_gre_peers:type_name -> magma.mconfig.PipelineD.AllowedGrePeer
-	37, // 8: magma.mconfig.PipelineD.ipdr_export_dst:type_name -> magma.mconfig.PipelineD.IPDRExportDst
-	38, // 9: magma.mconfig.PipelineD.li_ues:type_name -> magma.mconfig.PipelineD.LiUes
-	39, // 10: magma.mconfig.PipelineD.he_config:type_name -> magma.mconfig.PipelineD.HEConfig
-	47, // 11: magma.mconfig.SessionD.log_level:type_name -> magma.orc8r.LogLevel
-	14, // 12: magma.mconfig.SessionD.wallet_exhaust_detection:type_name -> magma.mconfig.WalletExhaustDetection
-	10, // 13: magma.mconfig.SessionD.sentry_config:type_name -> magma.mconfig.SentryConfig
+	38, // 7: magma.mconfig.PipelineD.allowed_gre_peers:type_name -> magma.mconfig.PipelineD.AllowedGrePeer
+	39, // 8: magma.mconfig.PipelineD.ipdr_export_dst:type_name -> magma.mconfig.PipelineD.IPDRExportDst
+	40, // 9: magma.mconfig.PipelineD.li_ues:type_name -> magma.mconfig.PipelineD.LiUes
+	41, // 10: magma.mconfig.PipelineD.he_config:type_name -> magma.mconfig.PipelineD.HEConfig
+	49, // 11: magma.mconfig.SessionD.log_level:type_name -> magma.orc8r.LogLevel
+	15, // 12: magma.mconfig.SessionD.wallet_exhaust_detection:type_name -> magma.mconfig.WalletExhaustDetection
+	11, // 13: magma.mconfig.SessionD.sentry_config:type_name -> magma.mconfig.SentryConfig
 	5,  // 14: magma.mconfig.WalletExhaustDetection.method:type_name -> magma.mconfig.WalletExhaustDetection.Method
-	47, // 15: magma.mconfig.PolicyDB.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 16: magma.mconfig.RedirectD.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 17: magma.mconfig.MobilityD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 15: magma.mconfig.PolicyDB.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 16: magma.mconfig.RedirectD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 17: magma.mconfig.MobilityD.log_level:type_name -> magma.orc8r.LogLevel
 	6,  // 18: magma.mconfig.MobilityD.ip_allocator_type:type_name -> magma.mconfig.MobilityD.IpAllocatorType
-	47, // 19: magma.mconfig.MME.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 19: magma.mconfig.MME.log_level:type_name -> magma.orc8r.LogLevel
 	7,  // 20: magma.mconfig.MME.non_eps_service_control:type_name -> magma.mconfig.MME.NonEPSServiceControl
-	40, // 21: magma.mconfig.MME.apn_correction_map_list:type_name -> magma.mconfig.MME.ApnCorrectionMap
-	41, // 22: magma.mconfig.MME.restricted_plmns:type_name -> magma.mconfig.MME.PlmnConfig
-	43, // 23: magma.mconfig.MME.service_area_maps:type_name -> magma.mconfig.MME.ServiceAreaMapsEntry
-	19, // 24: magma.mconfig.MME.federated_mode_map:type_name -> magma.mconfig.FederatedModeMap
-	44, // 25: magma.mconfig.MME.restricted_imeis:type_name -> magma.mconfig.MME.ImeiConfig
-	10, // 26: magma.mconfig.MME.sentry_config:type_name -> magma.mconfig.SentryConfig
-	20, // 27: magma.mconfig.FederatedModeMap.mapping:type_name -> magma.mconfig.ModeMapItem
+	42, // 21: magma.mconfig.MME.apn_correction_map_list:type_name -> magma.mconfig.MME.ApnCorrectionMap
+	43, // 22: magma.mconfig.MME.restricted_plmns:type_name -> magma.mconfig.MME.PlmnConfig
+	45, // 23: magma.mconfig.MME.service_area_maps:type_name -> magma.mconfig.MME.ServiceAreaMapsEntry
+	20, // 24: magma.mconfig.MME.federated_mode_map:type_name -> magma.mconfig.FederatedModeMap
+	46, // 25: magma.mconfig.MME.restricted_imeis:type_name -> magma.mconfig.MME.ImeiConfig
+	11, // 26: magma.mconfig.MME.sentry_config:type_name -> magma.mconfig.SentryConfig
+	21, // 27: magma.mconfig.FederatedModeMap.mapping:type_name -> magma.mconfig.ModeMapItem
 	8,  // 28: magma.mconfig.ModeMapItem.mode:type_name -> magma.mconfig.ModeMapItem.FederatedMode
-	47, // 29: magma.mconfig.SubscriberDB.log_level:type_name -> magma.orc8r.LogLevel
-	46, // 30: magma.mconfig.SubscriberDB.sub_profiles:type_name -> magma.mconfig.SubscriberDB.SubProfilesEntry
-	47, // 31: magma.mconfig.LighttpD.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 32: magma.mconfig.MonitorD.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 33: magma.mconfig.DPID.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 34: magma.mconfig.ConnectionD.log_level:type_name -> magma.orc8r.LogLevel
-	47, // 35: magma.mconfig.LIAgentD.log_level:type_name -> magma.orc8r.LogLevel
-	27, // 36: magma.mconfig.LIAgentD.nprobe_tasks:type_name -> magma.mconfig.NProbeTask
-	47, // 37: magma.mconfig.DnsD.log_level:type_name -> magma.orc8r.LogLevel
-	29, // 38: magma.mconfig.DnsD.records:type_name -> magma.mconfig.GatewayDNSConfigRecordsItems
-	9,  // 39: magma.mconfig.AgwD.log_level:type_name -> magma.mconfig.AgwD.LogLevel
-	47, // 40: magma.mconfig.SctpD.log_level:type_name -> magma.orc8r.LogLevel
-	34, // 41: magma.mconfig.EnodebD.EnbConfigsBySerialEntry.value:type_name -> magma.mconfig.EnodebD.EnodebConfig
-	2,  // 42: magma.mconfig.PipelineD.HEConfig.encryptionAlgorithm:type_name -> magma.mconfig.PipelineD.HEConfig.EncryptionAlgorithm
-	3,  // 43: magma.mconfig.PipelineD.HEConfig.hashFunction:type_name -> magma.mconfig.PipelineD.HEConfig.HashFunction
-	4,  // 44: magma.mconfig.PipelineD.HEConfig.encodingType:type_name -> magma.mconfig.PipelineD.HEConfig.EncodingType
-	42, // 45: magma.mconfig.MME.ServiceAreaMapsEntry.value:type_name -> magma.mconfig.MME.TacList
-	45, // 46: magma.mconfig.SubscriberDB.SubProfilesEntry.value:type_name -> magma.mconfig.SubscriberDB.SubscriptionProfile
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	49, // 29: magma.mconfig.SubscriberDB.log_level:type_name -> magma.orc8r.LogLevel
+	48, // 30: magma.mconfig.SubscriberDB.sub_profiles:type_name -> magma.mconfig.SubscriberDB.SubProfilesEntry
+	49, // 31: magma.mconfig.LighttpD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 32: magma.mconfig.MonitorD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 33: magma.mconfig.AcsD.log_level:type_name -> magma.orc8r.LogLevel
+	9,  // 34: magma.mconfig.AcsD.mode:type_name -> magma.mconfig.AcsD.Mode
+	49, // 35: magma.mconfig.DPID.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 36: magma.mconfig.ConnectionD.log_level:type_name -> magma.orc8r.LogLevel
+	49, // 37: magma.mconfig.LIAgentD.log_level:type_name -> magma.orc8r.LogLevel
+	29, // 38: magma.mconfig.LIAgentD.nprobe_tasks:type_name -> magma.mconfig.NProbeTask
+	49, // 39: magma.mconfig.DnsD.log_level:type_name -> magma.orc8r.LogLevel
+	31, // 40: magma.mconfig.DnsD.records:type_name -> magma.mconfig.GatewayDNSConfigRecordsItems
+	10, // 41: magma.mconfig.AgwD.log_level:type_name -> magma.mconfig.AgwD.LogLevel
+	49, // 42: magma.mconfig.SctpD.log_level:type_name -> magma.orc8r.LogLevel
+	36, // 43: magma.mconfig.EnodebD.EnbConfigsBySerialEntry.value:type_name -> magma.mconfig.EnodebD.EnodebConfig
+	2,  // 44: magma.mconfig.PipelineD.HEConfig.encryptionAlgorithm:type_name -> magma.mconfig.PipelineD.HEConfig.EncryptionAlgorithm
+	3,  // 45: magma.mconfig.PipelineD.HEConfig.hashFunction:type_name -> magma.mconfig.PipelineD.HEConfig.HashFunction
+	4,  // 46: magma.mconfig.PipelineD.HEConfig.encodingType:type_name -> magma.mconfig.PipelineD.HEConfig.EncodingType
+	44, // 47: magma.mconfig.MME.ServiceAreaMapsEntry.value:type_name -> magma.mconfig.MME.TacList
+	47, // 48: magma.mconfig.SubscriberDB.SubProfilesEntry.value:type_name -> magma.mconfig.SubscriberDB.SubscriptionProfile
+	49, // [49:49] is the sub-list for method output_type
+	49, // [49:49] is the sub-list for method input_type
+	49, // [49:49] is the sub-list for extension type_name
+	49, // [49:49] is the sub-list for extension extendee
+	0,  // [0:49] is the sub-list for field type_name
 }
 
 func init() { file_lte_protos_mconfig_mconfigs_proto_init() }
@@ -4338,7 +4480,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DPID); i {
+			switch v := v.(*AcsD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4350,7 +4492,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ConnectionD); i {
+			switch v := v.(*DPID); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4362,7 +4504,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LIAgentD); i {
+			switch v := v.(*ConnectionD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4374,7 +4516,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NProbeTask); i {
+			switch v := v.(*LIAgentD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4386,7 +4528,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DnsD); i {
+			switch v := v.(*NProbeTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4398,7 +4540,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GatewayDNSConfigRecordsItems); i {
+			switch v := v.(*DnsD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4410,7 +4552,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*AgwD); i {
+			switch v := v.(*GatewayDNSConfigRecordsItems); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4422,7 +4564,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SctpD); i {
+			switch v := v.(*AgwD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4434,7 +4576,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*EnodebD_FDDConfig); i {
+			switch v := v.(*SctpD); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4446,7 +4588,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*EnodebD_TDDConfig); i {
+			switch v := v.(*EnodebD_FDDConfig); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4458,6 +4600,18 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 			}
 		}
 		file_lte_protos_mconfig_mconfigs_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*EnodebD_TDDConfig); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*EnodebD_EnodebConfig); i {
 			case 0:
 				return &v.state
@@ -4469,7 +4623,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PipelineD_AllowedGrePeer); i {
 			case 0:
 				return &v.state
@@ -4481,7 +4635,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PipelineD_IPDRExportDst); i {
 			case 0:
 				return &v.state
@@ -4493,7 +4647,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[29].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PipelineD_LiUes); i {
 			case 0:
 				return &v.state
@@ -4505,7 +4659,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[29].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[30].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*PipelineD_HEConfig); i {
 			case 0:
 				return &v.state
@@ -4517,7 +4671,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[30].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[31].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*MME_ApnCorrectionMap); i {
 			case 0:
 				return &v.state
@@ -4529,7 +4683,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[31].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[32].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*MME_PlmnConfig); i {
 			case 0:
 				return &v.state
@@ -4541,7 +4695,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[32].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[33].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*MME_TacList); i {
 			case 0:
 				return &v.state
@@ -4553,7 +4707,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[34].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[35].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*MME_ImeiConfig); i {
 			case 0:
 				return &v.state
@@ -4565,7 +4719,7 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 				return nil
 			}
 		}
-		file_lte_protos_mconfig_mconfigs_proto_msgTypes[35].Exporter = func(v interface{}, i int) interface{} {
+		file_lte_protos_mconfig_mconfigs_proto_msgTypes[36].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SubscriberDB_SubscriptionProfile); i {
 			case 0:
 				return &v.state
@@ -4583,8 +4737,8 @@ func file_lte_protos_mconfig_mconfigs_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_lte_protos_mconfig_mconfigs_proto_rawDesc,
-			NumEnums:      10,
-			NumMessages:   37,
+			NumEnums:      11,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
