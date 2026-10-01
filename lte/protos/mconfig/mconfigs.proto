@@ -466,6 +466,25 @@ message MonitorD {
 }
 
 //------------------------------------------------------------------------------
+// AcsD configs
+//------------------------------------------------------------------------------
+// TR-069 ACS for the CPEs attached behind this gateway.
+message AcsD {
+    enum Mode {
+        // Serve CPEs normally.
+        ACTIVE = 0;
+        // Reserved for entitlement: accept Informs but queue no new tasks.
+        FROZEN = 1;
+    }
+    orc8r.LogLevel log_level = 1;
+    Mode mode = 2;
+    // CWMP listener port on mtr0. 0 means use the port in acsd.yml.
+    int32 port = 3;
+    // PeriodicInformInterval pushed to CPEs, in seconds. 0 leaves the CPE value.
+    int32 periodic_inform_interval = 4;
+}
+
+//------------------------------------------------------------------------------
 // DPID configs
 //------------------------------------------------------------------------------
 message DPID {
