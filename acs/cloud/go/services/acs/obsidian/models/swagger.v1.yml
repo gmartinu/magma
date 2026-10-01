@@ -10,6 +10,12 @@ magma-gen-meta:
   types:
     - go-struct-name: AcsDevice
       filename: acs_device_swaggergen.go
+    - go-struct-name: AcsTask
+      filename: acs_task_swaggergen.go
+    - go-struct-name: AcsTaskRequest
+      filename: acs_task_request_swaggergen.go
+    - go-struct-name: AcsParameterValue
+      filename: acs_parameter_value_swaggergen.go
 
 info:
   title: ACS
@@ -39,6 +45,74 @@ paths:
               $ref: '#/definitions/acs_device'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/devices/{device_id}/tasks:
+    get:
+      summary: List the tasks of a CPE, oldest first
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+      responses:
+        '200':
+          description: Tasks of the CPE
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    post:
+      summary: Queue a task, executed in the next session of the CPE
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+        - in: body
+          name: task
+          required: true
+          schema:
+            $ref: '#/definitions/acs_task_request'
+      responses:
+        '201':
+          description: The queued task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/devices/{device_id}/tasks/{task_id}:
+    get:
+      summary: Get a task of a CPE
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_device_id'
+        - $ref: '#/parameters/acs_task_id'
+      responses:
+        '200':
+          description: The task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+parameters:
+  acs_device_id:
+    in: path
+    name: device_id
+    description: TR-069 DeviceId as OUI-ProductClass-SerialNumber
+    required: true
+    type: string
+  acs_task_id:
+    in: path
+    name: task_id
+    description: Task ID
+    required: true
+    type: string
 
 definitions:
   acs_device:
@@ -83,5 +157,138 @@ definitions:
         format: date-time
       last_seen:
         x-nullable: false
+        type: string
+        format: date-time
+
+  acs_parameter_value:
+    description: A TR-069 parameter and its value
+    type: object
+    x-nullable: false
+    required:
+      - name
+      - value
+    properties:
+      name:
+        x-nullable: false
+        type: string
+        minLength: 1
+        example: Device.ManagementServer.PeriodicInformInterval
+      value:
+        x-nullable: false
+        type: string
+        example: '300'
+      type:
+        description: xsi:type of the value, xsd:string when empty
+        type: string
+        example: xsd:unsignedInt
+
+  acs_task_request:
+    description: An operation to run on a CPE in its next session
+    type: object
+    required:
+      - type
+    properties:
+      type:
+        x-nullable: false
+        type: string
+        enum:
+          - reboot
+          - factory_reset
+          - refresh
+          - get_parameter_values
+          - set_parameter_values
+          - get_parameter_names
+      parameter_names:
+        description: Parameters or partial paths to read (get_parameter_values)
+        type: array
+        items:
+          type: string
+      parameter_values:
+        description: Values to set (set_parameter_values)
+        type: array
+        items:
+          $ref: '#/definitions/acs_parameter_value'
+      parameter_path:
+        description: Path to list (get_parameter_names); the data model root when empty
+        type: string
+      next_level:
+        description: List only the direct children of parameter_path
+        type: boolean
+      max_attempts:
+        description: Sessions the task may be tried in; the service default when 0
+        type: integer
+        minimum: 0
+      ttl_sec:
+        description: Seconds after which a task not yet run expires; the service default when 0
+        type: integer
+        minimum: 0
+
+  acs_task:
+    description: An operation queued for a CPE
+    type: object
+    x-nullable: false
+    required:
+      - id
+      - device_id
+      - type
+      - status
+      - attempts
+      - max_attempts
+      - created
+      - updated
+    properties:
+      id:
+        x-nullable: false
+        type: string
+      device_id:
+        x-nullable: false
+        type: string
+      type:
+        x-nullable: false
+        type: string
+      status:
+        x-nullable: false
+        type: string
+        enum:
+          - pending
+          - in_progress
+          - done
+          - failed
+          - expired
+      attempts:
+        x-nullable: false
+        type: integer
+      max_attempts:
+        x-nullable: false
+        type: integer
+      parameter_names:
+        type: array
+        items:
+          type: string
+      parameter_values:
+        type: array
+        items:
+          $ref: '#/definitions/acs_parameter_value'
+      parameter_path:
+        type: string
+      next_level:
+        type: boolean
+      result:
+        description: What the CPE returned (values, names, status) and faults the task tolerated
+        type: object
+      fault_code:
+        description: CWMP fault code of the last failed attempt
+        type: integer
+      fault_string:
+        type: string
+      created:
+        x-nullable: false
+        type: string
+        format: date-time
+      updated:
+        x-nullable: false
+        type: string
+        format: date-time
+      deadline:
         type: string
         format: date-time

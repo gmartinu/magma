@@ -473,6 +473,20 @@ func (s *Server) write(req *request, sess *storage.Session, id string, msg cwmp.
 	_, _ = req.w.Write(out)
 }
 
+// HTTPServer returns the CWMP listener on port, separate from the echo
+// server that serves the REST API.
+func (s *Server) HTTPServer(port int) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           s,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		// CPEs keep the connection open across the requests of a session.
+		IdleTimeout: 90 * time.Second,
+	}
+}
+
 // RunMaintenance ends expired sessions and expires overdue tasks every
 // interval until stop is closed. Every replica may run it.
 func (s *Server) RunMaintenance(stop <-chan struct{}, interval time.Duration) {

@@ -14,6 +14,8 @@ limitations under the License.
 package storage_test
 
 import (
+	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,12 +30,15 @@ import (
 func TestSQLACSStorage_SQLite(t *testing.T) {
 	db, err := sqorc.Open("sqlite3", ":memory:?_foreign_keys=1")
 	require.NoError(t, err)
-	runStorageTests(t, storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder()))
+	runStorageTests(t, db)
 }
 
 // runStorageTests is shared with the Postgres integration test so both
 // dialects are held to the same behavior.
-func runStorageTests(t *testing.T, store storage.ACSStorage) {
+func runStorageTests(t *testing.T, db *sql.DB) {
+	sealer, err := storage.NewSealer(testKey())
+	require.NoError(t, err)
+	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder(), storage.WithSealer(sealer))
 	require.NoError(t, store.Init())
 	// Init runs on every service start, so it must be idempotent.
 	require.NoError(t, store.Init())
@@ -131,6 +136,18 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		got, err = store.GetCredentials(creds.DeviceID)
 		assert.NoError(t, err)
 		assert.Equal(t, creds, got)
+
+		var raw string
+		require.NoError(t, db.QueryRow("SELECT conn_req_password FROM acs_credentials WHERE device_id = '00259E-Titan4000-SN2'").Scan(&raw))
+		assert.NotContains(t, raw, "cr-pass")
+		assert.True(t, strings.HasPrefix(raw, "v1:"))
+
+		// A store without the key neither reads nor writes the secret, but
+		// devices without one still work.
+		keyless := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder())
+		_, err = keyless.GetCredentials(creds.DeviceID)
+		assert.ErrorIs(t, err, storage.ErrNoEncryptionKey)
+		assert.ErrorIs(t, keyless.PutCredentials(creds), storage.ErrNoEncryptionKey)
 
 		rotated := *creds
 		rotated.ACSPasswordHash = "hash2"
@@ -384,4 +401,12 @@ func runStorageTests(t *testing.T, store storage.ACSStorage) {
 		assert.Equal(t, int64(1120), end)
 		clock.SetAndFreezeClock(t, time.Unix(1000, 0))
 	})
+}
+
+func testKey() []byte {
+	key := make([]byte, storage.EncryptionKeySize)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	return key
 }

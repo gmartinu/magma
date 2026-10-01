@@ -93,6 +93,58 @@ paths:
       summary: List the CPEs claimed by the network
       tags:
       - ACS
+  /acs/{network_id}/devices/{device_id}/tasks:
+    get:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_device_id'
+      responses:
+        "200":
+          description: Tasks of the CPE
+          schema:
+            items:
+              $ref: '#/definitions/acs_task'
+            type: array
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: List the tasks of a CPE, oldest first
+      tags:
+      - ACS
+    post:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_device_id'
+      - in: body
+        name: task
+        required: true
+        schema:
+          $ref: '#/definitions/acs_task_request'
+      responses:
+        "201":
+          description: The queued task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Queue a task, executed in the next session of the CPE
+      tags:
+      - ACS
+  /acs/{network_id}/devices/{device_id}/tasks/{task_id}:
+    get:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_device_id'
+      - $ref: '#/parameters/acs_task_id'
+      responses:
+        "200":
+          description: The task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Get a task of a CPE
+      tags:
+      - ACS
   /channels:
     get:
       responses:
@@ -6329,6 +6381,18 @@ responses:
     schema:
       $ref: '#/definitions/error'
 parameters:
+  acs_device_id:
+    description: TR-069 DeviceId as OUI-ProductClass-SerialNumber
+    in: path
+    name: device_id
+    required: true
+    type: string
+  acs_task_id:
+    description: Task ID
+    in: path
+    name: task_id
+    required: true
+    type: string
   apn_name:
     description: Access Point Name
     in: path
@@ -6583,6 +6647,139 @@ definitions:
     - last_seen
     type: object
     x-nullable: false
+  acs_parameter_value:
+    description: A TR-069 parameter and its value
+    properties:
+      name:
+        example: Device.ManagementServer.PeriodicInformInterval
+        minLength: 1
+        type: string
+        x-nullable: false
+      type:
+        description: xsi:type of the value, xsd:string when empty
+        example: xsd:unsignedInt
+        type: string
+      value:
+        example: "300"
+        type: string
+        x-nullable: false
+    required:
+    - name
+    - value
+    type: object
+    x-nullable: false
+  acs_task:
+    description: An operation queued for a CPE
+    properties:
+      attempts:
+        type: integer
+        x-nullable: false
+      created:
+        format: date-time
+        type: string
+        x-nullable: false
+      deadline:
+        format: date-time
+        type: string
+      device_id:
+        type: string
+        x-nullable: false
+      fault_code:
+        description: CWMP fault code of the last failed attempt
+        type: integer
+      fault_string:
+        type: string
+      id:
+        type: string
+        x-nullable: false
+      max_attempts:
+        type: integer
+        x-nullable: false
+      next_level:
+        type: boolean
+      parameter_names:
+        items:
+          type: string
+        type: array
+      parameter_path:
+        type: string
+      parameter_values:
+        items:
+          $ref: '#/definitions/acs_parameter_value'
+        type: array
+      result:
+        description: What the CPE returned (values, names, status) and faults the
+          task tolerated
+        type: object
+      status:
+        enum:
+        - pending
+        - in_progress
+        - done
+        - failed
+        - expired
+        type: string
+        x-nullable: false
+      type:
+        type: string
+        x-nullable: false
+      updated:
+        format: date-time
+        type: string
+        x-nullable: false
+    required:
+    - id
+    - device_id
+    - type
+    - status
+    - attempts
+    - max_attempts
+    - created
+    - updated
+    type: object
+    x-nullable: false
+  acs_task_request:
+    description: An operation to run on a CPE in its next session
+    properties:
+      max_attempts:
+        description: Sessions the task may be tried in; the service default when 0
+        minimum: 0
+        type: integer
+      next_level:
+        description: List only the direct children of parameter_path
+        type: boolean
+      parameter_names:
+        description: Parameters or partial paths to read (get_parameter_values)
+        items:
+          type: string
+        type: array
+      parameter_path:
+        description: Path to list (get_parameter_names); the data model root when
+          empty
+        type: string
+      parameter_values:
+        description: Values to set (set_parameter_values)
+        items:
+          $ref: '#/definitions/acs_parameter_value'
+        type: array
+      ttl_sec:
+        description: Seconds after which a task not yet run expires; the service default
+          when 0
+        minimum: 0
+        type: integer
+      type:
+        enum:
+        - reboot
+        - factory_reset
+        - refresh
+        - get_parameter_values
+        - set_parameter_values
+        - get_parameter_names
+        type: string
+        x-nullable: false
+    required:
+    - type
+    type: object
   aggregated_maximum_bitrate:
     properties:
       max_bandwidth_dl:

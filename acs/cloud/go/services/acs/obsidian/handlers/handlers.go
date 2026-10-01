@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -27,19 +28,27 @@ import (
 const (
 	ManageNetworkPath = obsidian.V1Root + acs.ModuleName + obsidian.UrlSep + ":network_id"
 	DevicesPath       = ManageNetworkPath + obsidian.UrlSep + "devices"
+	TasksPath         = DevicesPath + obsidian.UrlSep + ":device_id" + obsidian.UrlSep + "tasks"
+	TaskPath          = TasksPath + obsidian.UrlSep + ":task_id"
 )
 
 type Handlers struct {
 	store storage.ACSStorage
+	// TaskMaxAttempts and TaskTTL apply to tasks created without them.
+	TaskMaxAttempts int
+	TaskTTL         time.Duration
 }
 
 func NewHandlers(store storage.ACSStorage) *Handlers {
-	return &Handlers{store: store}
+	return &Handlers{store: store, TaskMaxAttempts: 3, TaskTTL: 7 * 24 * time.Hour}
 }
 
 func (h *Handlers) GetHandlers() []obsidian.Handler {
 	return []obsidian.Handler{
 		{Path: DevicesPath, Methods: obsidian.GET, HandlerFunc: h.listDevices},
+		{Path: TasksPath, Methods: obsidian.GET, HandlerFunc: h.listTasks},
+		{Path: TasksPath, Methods: obsidian.POST, HandlerFunc: h.createTask},
+		{Path: TaskPath, Methods: obsidian.GET, HandlerFunc: h.getTask},
 	}
 }
 
