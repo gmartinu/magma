@@ -22,6 +22,8 @@ import (
 
 	"magma/acs/cloud/go/services/acs/auth"
 	"magma/acs/cloud/go/services/acs/cwmp/server"
+	"magma/acs/cloud/go/services/acs/kpi"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/acs/cloud/go/services/acs/storage"
 )
 
@@ -62,6 +64,15 @@ type Config struct {
 	// OnlineDefaultIntervalSec for devices that have not reported one.
 	OnlineIntervalMultiple   float64 `yaml:"online_interval_multiple"`
 	OnlineDefaultIntervalSec int64   `yaml:"online_default_interval_sec"`
+	// PushKPIs pushes the KPIs of claimed CPEs to metricsd; defaults to
+	// true.
+	PushKPIs *bool `yaml:"push_kpis"`
+	// OnlineMetricsIntervalSec is how often acs_online is pushed for every
+	// claimed CPE.
+	OnlineMetricsIntervalSec int `yaml:"online_metrics_interval_sec"`
+	// SessionLogURL is the fluentd in_http endpoint session logs are posted
+	// to, its path being the tag. Empty writes them to stdout as JSON lines.
+	SessionLogURL string `yaml:"session_log_url"`
 }
 
 // ServerConfig returns the runtime config of the CWMP endpoint.
@@ -145,4 +156,29 @@ func (c Config) TaskDefaults() (maxAttempts int, ttl time.Duration) {
 
 func seconds(n int) time.Duration {
 	return time.Duration(n) * time.Second
+}
+
+// KPIReporter returns the reporter of CPE KPIs, nil when they are not pushed.
+func (c Config) KPIReporter() *kpi.Reporter {
+	if c.PushKPIs != nil && !*c.PushKPIs {
+		return nil
+	}
+	return kpi.NewReporter(kpi.MetricsdPusher{}, 10*time.Second, 64)
+}
+
+// OnlineMetricsInterval is how often acs_online is pushed for every claimed
+// CPE.
+func (c Config) OnlineMetricsInterval() time.Duration {
+	if c.OnlineMetricsIntervalSec <= 0 {
+		return 5 * time.Minute
+	}
+	return seconds(c.OnlineMetricsIntervalSec)
+}
+
+// SessionLogSink returns where session logs go.
+func (c Config) SessionLogSink() sessionlog.Sink {
+	if c.SessionLogURL == "" {
+		return sessionlog.NewWriterSink(os.Stdout)
+	}
+	return sessionlog.NewHTTPSink(c.SessionLogURL, 1024, 5*time.Second)
 }
