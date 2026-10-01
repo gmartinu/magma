@@ -203,6 +203,46 @@ paths:
       summary: Get a task of a CPE
       tags:
       - ACS
+  /acs/{network_id}/logs:
+    get:
+      description: |
+        One record per CWMP exchange of the network's CPEs (Inform, each RPC, session end, auth failure, rate limit), newest first, from the acs-* Elasticsearch indices. Records of a CPE before it was claimed carry no network and are not listed. Indices are kept for the Elasticsearch retention (7 days by default).
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - description: Only records of this CPE (OUI-ProductClass-SerialNumber)
+        in: query
+        name: device_id
+        required: false
+        type: string
+      - description: Only records at or after this time (RFC 3339)
+        format: date-time
+        in: query
+        name: begin
+        required: false
+        type: string
+      - description: Only records at or before this time (RFC 3339)
+        format: date-time
+        in: query
+        name: end
+        required: false
+        type: string
+      - description: Maximum number of records returned (1-1000, default 50)
+        in: query
+        maximum: 1000
+        minimum: 1
+        name: size
+        required: false
+        type: integer
+      responses:
+        "200":
+          description: Session log records
+          schema:
+            $ref: '#/definitions/acs_session_logs'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Search the CWMP session logs of a network
+      tags:
+      - ACS
   /acs/unclaimed:
     get:
       description: |
@@ -6826,6 +6866,85 @@ definitions:
     required:
     - name
     - value
+    type: object
+    x-nullable: false
+  acs_session_log:
+    description: One CWMP exchange of a CPE
+    properties:
+      bootstrap:
+        description: The session authenticated with the bootstrap credentials
+        type: boolean
+      device_id:
+        type: string
+      duration_ms:
+        description: Time the ACS took to handle the request
+        format: int64
+        type: integer
+      event:
+        enum:
+        - inform
+        - rpc
+        - session_end
+        - auth_failure
+        - rate_limited
+        type: string
+      event_codes:
+        description: Inform event codes, e.g. 2 PERIODIC
+        items:
+          type: string
+        type: array
+      fault_code:
+        type: integer
+      fault_string:
+        type: string
+      handler:
+        description: Data model handler serving the CPE
+        type: string
+      network_id:
+        type: string
+      reason:
+        description: Why the request was refused
+        type: string
+      rpc:
+        description: The CPE request, or the ACS request the CPE answered
+        type: string
+      rpc_count:
+        description: ACS requests sent in the session, on session_end
+        type: integer
+      session_duration_sec:
+        description: Length of the session, on session_end
+        format: int64
+        type: integer
+      session_id:
+        type: string
+      source_ip:
+        type: string
+      task_id:
+        type: string
+      task_type:
+        type: string
+      time:
+        format: date-time
+        type: string
+    required:
+    - time
+    - event
+    type: object
+    x-nullable: false
+  acs_session_logs:
+    description: A page of session log records
+    properties:
+      logs:
+        items:
+          $ref: '#/definitions/acs_session_log'
+        type: array
+      total_count:
+        description: Records matching the query, beyond the page size
+        format: int64
+        type: integer
+    required:
+    - total_count
+    - logs
     type: object
     x-nullable: false
   acs_task:
