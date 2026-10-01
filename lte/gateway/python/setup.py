@@ -24,6 +24,7 @@ setup(
     name='lte',
     version=VERSION,
     packages=[
+        'magma.acsd',
         'magma.enodebd',
         'magma.enodebd.data_models',
         'magma.enodebd.device_config',

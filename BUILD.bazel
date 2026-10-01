@@ -86,6 +86,11 @@ alias(
 )
 
 alias(
+    name = "acsd",
+    actual = "//lte/gateway/python/magma/acsd:acsd",
+)
+
+alias(
     name = "monitord",
     actual = "//lte/gateway/python/magma/monitord:monitord",
 )
