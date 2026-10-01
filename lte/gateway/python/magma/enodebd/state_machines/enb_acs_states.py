@@ -36,7 +36,7 @@ from magma.enodebd.state_machines.acs_state_utils import (
 )
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
 from magma.enodebd.state_machines.timer import StateMachineTimer
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 AcsMsgAndTransition = namedtuple(
     'AcsMsgAndTransition', ['msg', 'next_state'],

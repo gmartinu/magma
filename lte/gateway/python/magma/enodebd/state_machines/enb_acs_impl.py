@@ -24,8 +24,8 @@ from magma.enodebd.logger import EnodebdLogger as logger
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
 from magma.enodebd.state_machines.enb_acs_states import EnodebAcsState
 from magma.enodebd.state_machines.timer import StateMachineTimer
-from magma.enodebd.tr069 import models
-from magma.enodebd.tr069.models import Tr069ComplexModel
+from magma.tr069 import models
+from magma.tr069.models import Tr069ComplexModel
 
 
 class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
