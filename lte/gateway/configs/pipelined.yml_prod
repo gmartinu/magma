@@ -49,6 +49,14 @@ access_control:
   # Blocks access to all AGW local IPs from UEs.
   block_agw_local_ips: true
 
+  # Let UEs (TR-069 CPEs) reach acsd over TCP on the mtr_interface IPv4
+  # address (http://10.1.0.1:<acs_port>/) despite block_agw_local_ips.
+  # Unset by default: no flows are installed unless acsd is in use.
+  # acs_connection_request_port is the port CPEs listen on for
+  # ConnectionRequests (default 7547); only their replies are allowed back.
+  # acs_port: 48081
+  # acs_connection_request_port: 7547
+
   # Traffic to ip blocks in the specified direction in the blocklist will be
   # dropped. Each entry in the blocklist should consist of an ip and a
   # direction('inbound' or 'outbound'). If direction is not specified, then
