@@ -209,6 +209,20 @@ services:
       MAGMA_DEV_MODE: ${MAGMA_DEV_MODE}
     command: /usr/bin/env python3 -m magma.monitord.main
 
+  # Dynamic service, off by default: magmad starts/stops it from the
+  # magmad mconfig dynamic_services. Not in waitForHealthyPods for that reason.
+  acsd:
+    <<: *pyservice
+    container_name: acsd
+    healthcheck:
+      test: [ "CMD", "nc", "-zv", "localhost", "50086" ]
+      interval: "4s"
+      timeout: "4s"
+      retries: 3
+    environment:
+      MAGMA_DEV_MODE: ${MAGMA_DEV_MODE}
+    command: /usr/bin/env python3 -m magma.acsd.main
+
   redirectd:
     <<: *pyservice
     container_name: redirectd
