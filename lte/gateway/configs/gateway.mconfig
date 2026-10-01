@@ -1,5 +1,12 @@
 {
   "configs_by_key": {
+    "acsd": {
+      "@type": "type.googleapis.com/magma.mconfig.AcsD",
+      "logLevel": "INFO",
+      "mode": "ACTIVE",
+      "port": 48081,
+      "periodicInformInterval": 0
+    },
     "connectiond": {
       "@type": "type.googleapis.com/magma.mconfig.ConnectionD",
       "logLevel": "INFO"

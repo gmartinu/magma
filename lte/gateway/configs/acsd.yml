@@ -1,0 +1,21 @@
+---
+#
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# log_level is set in mconfig. it can be overridden here
+
+# CWMP (TR-069) listener for the CPEs behind this gateway. Every AGW has the
+# same mtr0 address, so CPEs use one ACS URL: http://10.1.0.1:<cwmp_port>/
+# 48080 is taken by enodebd. The mconfig port, when set, overrides this one.
+cwmp_interface: mtr0
+cwmp_address: 10.1.0.1
+cwmp_port: 48081
