@@ -57,6 +57,20 @@ pytest_test(
 )
 
 pytest_test(
+    name = "test_access_control_acs",
+    size = "small",
+    srcs = ["test_access_control_acs.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/pipelined/app:access_control",
+        "//lte/protos:mconfigs_python_proto",
+    ],
+)
+
+pytest_test(
     name = "test_arp",
     size = "small",
     srcs = ["test_arp.py"],

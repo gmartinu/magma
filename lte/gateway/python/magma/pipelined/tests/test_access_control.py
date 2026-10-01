@@ -24,6 +24,7 @@ from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery as FlowQuery
 from magma.pipelined.tests.app.packet_builder import (
     IPPacketBuilder,
     IPv6PacketBuilder,
+    TCPPacketBuilder,
 )
 from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
 from magma.pipelined.tests.app.start_pipelined import (
@@ -48,6 +49,7 @@ from magma.pipelined.tests.pipelined_test_util import (
     wait_after_send,
 )
 from ryu.lib.packet import ether_types
+from ryu.lib.packet.in_proto import IPPROTO_TCP
 
 
 class AbstractAccessControlTest(unittest.TestCase):
@@ -577,6 +579,103 @@ class AccessControlTestLocalIpBlockLTEIpV6(AbstractAccessControlTest):
         )
 
 
+class AccessControlTestLocalIpBlockLTEAcs(AbstractAccessControlTest):
+    """
+    With access_control.acs_port set, UEs reach acsd on the mtr0 IPv4
+    address over TCP on that port only, and can answer ConnectionRequests
+    from the CR port. Needs the mtr0 interface (10.1.0.1) of the Magma VM.
+    """
+    MTR_IP = '10.1.0.1'
+    ACS_PORT = 48081
+    CR_PORT = 7547
+
+    @classmethod
+    def get_config(cls):
+        config = {
+            'setup_type': 'LTE',
+            'allow_unknown_arps': False,
+            'bridge_name': cls.BRIDGE,
+            'bridge_ip_address': cls.BRIDGE_IP,
+            'nat_iface': 'eth2',
+            'enodeb_iface': 'eth1',
+            'qos': {'enable': False},
+            'access_control': {
+                'ip_blocklist': [],
+                'block_agw_local_ips': True,
+                'acs_port': cls.ACS_PORT,
+            },
+            'clean_restart': True,
+            'mtr_interface': 'mtr0',
+        }
+        return config
+
+    @classmethod
+    def get_mconfig(cls):
+        return PipelineD(
+            allowed_gre_peers=[{'ip': '1.2.3.4/24', 'key': 123}],
+        )
+
+    def _tcp_query(self, **tcp_match):
+        return FlowQuery(
+            self._tbl_num, self.testing_controller,
+            match=MagmaMatch(
+                direction=Direction.OUT,
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_dst=self.MTR_IP,
+                ip_proto=IPPROTO_TCP,
+                **tcp_match,
+            ),
+        )
+
+    def test_acs_tcp_allowed_other_ports_blocked(self):
+        """
+        Assert:
+            TCP to mtr0:acs_port and the CPE SYN-ACK from the CR port hit the
+            allow flows; TCP to another mtr0 port and a bare SYN from the CR
+            port (a new connection to mtr0) do not.
+        """
+        sub = self._setup_subscribers()
+
+        isolator = RyuDirectTableIsolator(
+            RyuForwardFlowArgsBuilder.from_subscriber(sub).build_requests(),
+            self.testing_controller,
+        )
+
+        pkt_sender = ScapyPacketInjector(self.BRIDGE)
+        packets = [
+            _build_tcp_packet(self.MAC_DEST, self.MTR_IP, sub.ip, 40000, self.ACS_PORT, "S"),
+            _build_tcp_packet(self.MAC_DEST, self.MTR_IP, sub.ip, 40000, 22, "S"),
+            _build_tcp_packet(self.MAC_DEST, self.MTR_IP, sub.ip, self.CR_PORT, 40001, "SA"),
+            _build_tcp_packet(self.MAC_DEST, self.MTR_IP, sub.ip, self.CR_PORT, 22, "S"),
+        ]
+
+        flow_verifier = FlowVerifier(
+            [
+                FlowTest(
+                    FlowQuery(self._tbl_num, self.testing_controller), 4,
+                ),
+                FlowTest(self._tcp_query(tcp_dst=self.ACS_PORT), 1, flow_count=1),
+                FlowTest(
+                    self._tcp_query(
+                        tcp_src=self.CR_PORT, tcp_flags_nxm=(0x012, 0x012),
+                    ), 1, flow_count=1,
+                ),
+                FlowTest(
+                    self._tcp_query(
+                        tcp_src=self.CR_PORT, tcp_flags_nxm=(0, 0x002),
+                    ), 0, flow_count=1,
+                ),
+            ],
+            lambda: wait_after_send(self.testing_controller),
+        )
+
+        with isolator, flow_verifier:
+            for packet in packets:
+                pkt_sender.send(packet)
+
+        flow_verifier.verify()
+
+
 def _build_default_ip_packet(mac, dst, src):
     return IPPacketBuilder() \
         .set_ip_layer(dst, src) \
@@ -586,6 +685,15 @@ def _build_default_ip_packet(mac, dst, src):
 
 def _build_default_ipv6_packet(mac, dst, src):
     return IPv6PacketBuilder() \
+        .set_ip_layer(dst, src) \
+        .set_ether_layer(mac, "00:00:00:00:00:00") \
+        .build()
+
+
+def _build_tcp_packet(mac, dst, src, sport, dport, flags):
+    return TCPPacketBuilder() \
+        .set_tcp_layer(sport, dport, 0) \
+        .set_tcp_flags(flags) \
         .set_ip_layer(dst, src) \
         .set_ether_layer(mac, "00:00:00:00:00:00") \
         .build()
