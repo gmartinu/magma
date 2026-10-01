@@ -51,6 +51,8 @@
 !dp/protos/
 !dp/Makefile
 
+!acs/cloud/
+
 !build/gen
 
 !protos/

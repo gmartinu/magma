@@ -18,6 +18,8 @@ securityDefinitions:
 security:
 - tokenAuth: []
 tags:
+- description: Endpoints related to TR-069 CPEs managed by the ACS
+  name: ACS
 - description: Access point name
   name: APNs
 - description: Version info
@@ -75,6 +77,22 @@ paths:
       summary: Get version
       tags:
       - About
+  /acs/{network_id}/devices:
+    get:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      responses:
+        "200":
+          description: CPEs claimed by the network
+          schema:
+            items:
+              $ref: '#/definitions/acs_device'
+            type: array
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: List the CPEs claimed by the network
+      tags:
+      - ACS
   /channels:
     get:
       responses:
@@ -6521,6 +6539,50 @@ definitions:
       radius_config:
         $ref: '#/definitions/radius_config'
     type: object
+  acs_device:
+    description: A TR-069 CPE known to the ACS
+    properties:
+      device_id:
+        description: TR-069 DeviceId as OUI-ProductClass-SerialNumber
+        example: 00259E-Titan4000-ABC123456
+        minLength: 1
+        type: string
+        x-nullable: false
+      firmware:
+        description: Software version reported by the CPE
+        type: string
+      first_seen:
+        format: date-time
+        type: string
+        x-nullable: false
+      handler:
+        description: Model handler the ACS uses for this CPE
+        type: string
+      last_seen:
+        format: date-time
+        type: string
+        x-nullable: false
+      model:
+        type: string
+      oui:
+        example: 00259E
+        type: string
+        x-nullable: false
+      product_class:
+        example: Titan4000
+        type: string
+      serial_number:
+        example: ABC123456
+        type: string
+        x-nullable: false
+    required:
+    - device_id
+    - oui
+    - serial_number
+    - first_seen
+    - last_seen
+    type: object
+    x-nullable: false
   aggregated_maximum_bitrate:
     properties:
       max_bandwidth_dl:

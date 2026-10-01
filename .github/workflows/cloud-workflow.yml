@@ -52,6 +52,7 @@ jobs:
               - "orc8r/**"
               - "dp/cloud/**"
               - "dp/protos/**"
+              - "acs/cloud/**"
       - name: Save should_not_skip output
         if: always()
         run: |
