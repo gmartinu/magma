@@ -23,7 +23,7 @@ modifications are required because:
 from typing import Any, Dict, List, Union
 
 from lxml import etree
-from magma.enodebd.logger import EnodebdLogger as logger
+from magma.tr069.logger import logger
 from spyne.application import Application
 from spyne.interface._base import Interface
 from spyne.protocol.soap import Soap11

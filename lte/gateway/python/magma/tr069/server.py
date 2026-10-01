@@ -22,23 +22,25 @@ from wsgiref.simple_server import (
 
 from magma.common.misc_utils import get_ip_from_if
 from magma.configuration.service_configs import load_service_config
-from magma.enodebd.logger import EnodebdLogger as logger
-from magma.enodebd.state_machines.enb_acs_manager import StateMachineManager
+from magma.tr069.logger import logger
 from spyne.server.wsgi import WsgiApplication
 
 from .models import CWMP_NS
-from .rpc_methods import AutoConfigServer
+from .rpc_methods import AutoConfigServer, Tr069MessageHandler
 from .spyne_mods import Tr069Application, Tr069Soap11
 
 # Socket timeout in seconds. Should be set larger than the longest TR-069
 # response time (typically for a GetParameterValues of the entire data model),
-# measured at 168secs. Should also be set smaller than ENB_CONNECTION_TIMEOUT,
-# to avoid incorrectly detecting eNodeB timeout.
+# measured at 168secs against an eNodeB. Should also be set smaller than the
+# hosting service's device connection timeout (e.g. enodebd's
+# ENB_CONNECTION_TIMEOUT), to avoid incorrectly detecting a device timeout.
 SOCKET_TIMEOUT = 240
 
 
 class tr069_WSGIRequestHandler(WSGIRequestHandler):
     timeout = 10
+    # What the hosting service calls its devices in logs, e.g. 'eNodeB'
+    device_name = 'CPE'
     # pylint: disable=attribute-defined-outside-init
 
     def handle_single(self):
@@ -61,7 +63,7 @@ class tr069_WSGIRequestHandler(WSGIRequestHandler):
         handler.http_version = "1.1"
         handler.request_handler = self  # backpointer for logging
 
-        # eNodeB will sometimes close connection to enodebd.
+        # The CPE (e.g. an eNodeB) will sometimes close the connection.
         # The cause of this is unknown, but we can safely ignore the
         # closed connection, and continue as normal otherwise.
         #
@@ -72,7 +74,10 @@ class tr069_WSGIRequestHandler(WSGIRequestHandler):
         try:
             handler.run(self.server.get_app())
         except BrokenPipeError:
-            self.log_error("eNodeB has unexpectedly closed the TCP connection.")
+            self.log_error(
+                "%s has unexpectedly closed the TCP connection.",
+                self.device_name,
+            )
 
     def handle(self):
         self.protocol_version = "HTTP/1.1"
@@ -107,16 +112,21 @@ class tr069_WSGIRequestHandler(WSGIRequestHandler):
         logger.warning("%s - %s", self.client_address[0], format % args)
 
 
-def tr069_server(state_machine_manager: StateMachineManager) -> None:
+def tr069_server(
+    state_machine_manager: Tr069MessageHandler,
+    service_name: str,
+    device_name: str = 'CPE',
+) -> None:
     """
-    TR-069 server
+    TR-069 server. Blocks serving the ACS forever; run it in its own thread.
     Inputs:
-        - acs_to_cpe_queue = instance of Queue
-            containing messages from parent process/thread to be sent to CPE
-        - cpe_to_acs_queue = instance of Queue
-            containing messages from CPE to be sent to parent process/thread
+        - state_machine_manager: receives every CWMP message and returns the
+            next message for the CPE
+        - service_name: service whose config holds the `tr069` section
+            (`interface` and `port` to bind to)
+        - device_name: what the devices are called in connection logs
     """
-    config = load_service_config("enodebd")
+    config = load_service_config(service_name)
 
     AutoConfigServer.set_state_machine_manager(state_machine_manager)
 
@@ -142,7 +152,11 @@ def tr069_server(state_machine_manager: StateMachineManager) -> None:
     server = make_server(
         ip_address,
         config['tr069']['port'], wsgi_app,
-        WSGIServer, tr069_WSGIRequestHandler,
+        WSGIServer,
+        type(
+            'Tr069RequestHandler', (tr069_WSGIRequestHandler,),
+            {'device_name': device_name},
+        ),
     )
 
     # Note: use single-thread server, to avoid state contention

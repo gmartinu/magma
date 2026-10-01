@@ -13,6 +13,12 @@ load("@python_deps//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
+    name = "logger",
+    srcs = ["logger.py"],
+    visibility = ["//visibility:public"],
+)
+
+py_library(
     name = "models",
     srcs = ["models.py"],
     visibility = ["//visibility:public"],
@@ -27,8 +33,13 @@ py_library(
     srcs = ["server.py"],
     visibility = ["//visibility:public"],
     deps = [
+        ":logger",
+        ":models",
         ":rpc_methods",
         ":spyne_mods",
+        "//orc8r/gateway/python/magma/common:misc_utils",
+        "//orc8r/gateway/python/magma/configuration:service_configs",
+        requirement("spyne"),
     ],
 )
 
@@ -36,6 +47,12 @@ py_library(
     name = "rpc_methods",
     srcs = ["rpc_methods.py"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":logger",
+        ":models",
+        ":spyne_mods",
+        requirement("spyne"),
+    ],
 )
 
 py_library(
@@ -43,7 +60,8 @@ py_library(
     srcs = ["spyne_mods.py"],
     visibility = ["//visibility:public"],
     deps = [
-        "//lte/gateway/python/magma/enodebd:logger",
+        ":logger",
         requirement("lxml"),
+        requirement("spyne"),
     ],
 )

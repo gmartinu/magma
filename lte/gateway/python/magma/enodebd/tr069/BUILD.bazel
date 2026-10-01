@@ -11,7 +11,20 @@
 
 load("@rules_python//python:defs.bzl", "py_library")
 
-# Deprecated aliases: the TR-069 layer moved to //lte/gateway/python/magma/tr069.
+# enodebd's entry point onto the shared //lte/gateway/python/magma/tr069 stack.
+py_library(
+    name = "server",
+    srcs = ["server.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lte/gateway/python/magma/enodebd:logger",
+        "//lte/gateway/python/magma/enodebd/state_machines:enb_acs_manager",
+        "//lte/gateway/python/magma/tr069:logger",
+        "//lte/gateway/python/magma/tr069:server",
+    ],
+)
+
+# Deprecated aliases: the TR-069 codec moved to //lte/gateway/python/magma/tr069.
 py_library(
     name = "models",
     srcs = ["models.py"],
@@ -24,13 +37,6 @@ py_library(
     srcs = ["rpc_methods.py"],
     visibility = ["//visibility:public"],
     deps = ["//lte/gateway/python/magma/tr069:rpc_methods"],
-)
-
-py_library(
-    name = "server",
-    srcs = ["server.py"],
-    visibility = ["//visibility:public"],
-    deps = ["//lte/gateway/python/magma/tr069:server"],
 )
 
 py_library(

@@ -11,9 +11,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from magma.enodebd.logger import EnodebdLogger as logger
-from magma.enodebd.state_machines.enb_acs_manager import StateMachineManager
-from magma.enodebd.tr069.spyne_mods import as_dict
+from typing import Protocol
+
+from magma.tr069.logger import logger
+from magma.tr069.spyne_mods import as_dict
 from spyne.decorator import rpc
 from spyne.model.complex import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
@@ -46,6 +47,19 @@ PSEUDO_RPC_METHODS = ['Fault']
 # Top-level CWMP header elements. Namespaces should be preserved on these (since
 # they are not within other CWMP elements)
 TOP_LEVEL_HEADER_ELEMENTS = ['ID', 'HoldRequests']
+
+
+class Tr069MessageHandler(Protocol):
+    """ Whatever owns the per-device state machines (e.g. enodebd's
+        StateMachineManager). Receives every CWMP message and returns the
+        next message to send to the CPE. """
+
+    def handle_tr069_message(
+        self,
+        ctx: WsgiMethodContext,
+        tr069_message: ComplexModelBase,
+    ) -> ComplexModelBase:
+        ...
 
 
 def fill_response_header(ctx):
@@ -81,7 +95,7 @@ class AutoConfigServer(ServiceBase):
     @classmethod
     def set_state_machine_manager(
         cls,
-        state_machine_manager: StateMachineManager,
+        state_machine_manager: Tr069MessageHandler,
     ) -> None:
         cls.state_machine_manager = state_machine_manager
 
@@ -118,7 +132,7 @@ class AutoConfigServer(ServiceBase):
             message: ComplexModelBase,
     ) -> ComplexModelBase:
         # We want to blanket-catch all exceptions because a problem with one
-        # tr-069 session shouldn't tank the service for all other enodeB's
+        # tr-069 session shouldn't tank the service for all other devices
         # being managed
         try:
             return cls.state_machine_manager.handle_tr069_message(ctx, message)
