@@ -35,6 +35,8 @@ import (
 	"magma/acs/cloud/go/services/acs/auth"
 	"magma/acs/cloud/go/services/acs/cwmp"
 	"magma/acs/cloud/go/services/acs/datamodel"
+	"magma/acs/cloud/go/services/acs/kpi"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/orc8r/cloud/go/clock"
 )
@@ -102,11 +104,13 @@ type Server struct {
 	handlers      *datamodel.Registry
 	auth          *auth.Authenticator
 	bootstrapHash string
+	kpis          *kpi.Reporter
+	logs          sessionlog.Sink
 }
 
 // New returns a server. The Digest nonce secret is read from, or created in,
 // the database so that every replica shares it.
-func New(cfg Config, store storage.ACSStorage, handlers *datamodel.Registry) (*Server, error) {
+func New(cfg Config, store storage.ACSStorage, handlers *datamodel.Registry, opts ...Option) (*Server, error) {
 	cfg = cfg.withDefaults()
 	secret, err := store.GetOrCreateSecret(nonceSecretName, func() (string, error) { return randomHex(32) })
 	if err != nil {
@@ -121,6 +125,9 @@ func New(cfg Config, store storage.ACSStorage, handlers *datamodel.Registry) (*S
 	if cfg.BootstrapUsername != "" && cfg.BootstrapPassword != "" {
 		s.bootstrapHash = auth.HashPassword(cfg.BootstrapUsername, cfg.Realm, cfg.BootstrapPassword)
 	}
+	for _, o := range opts {
+		o(s)
+	}
 	return s, nil
 }
 
@@ -130,6 +137,12 @@ type request struct {
 	r      *http.Request
 	secure bool
 	client string
+	start  time.Time
+	// deviceID is the device an Inform claims to be, before it is
+	// authenticated.
+	deviceID     string
+	networkID    string
+	networkKnown bool
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +151,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	req := &request{w: w, r: r, secure: s.isSecure(r), client: s.clientAddr(r)}
+	req := &request{w: w, r: r, secure: s.isSecure(r), client: s.clientAddr(r), start: time.Now()}
 	body, err := s.readBody(w, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -263,8 +276,11 @@ func (s *Server) sessionFromAuth(req *request) (*storage.Session, bool) {
 }
 
 func (s *Server) challenge(req *request, err error) {
+	// A request without credentials is the first leg of Digest, not a
+	// failure.
 	if err != nil && !errors.Is(err, auth.ErrNoCredentials) {
 		glog.Warningf("cwmp %s: auth failed: %s", req.client, err)
+		s.authFailed(req, req.deviceID, err.Error())
 	}
 	s.auth.Challenge(req.w, req.secure, errors.Is(err, auth.ErrStaleNonce))
 }
@@ -311,6 +327,7 @@ func (s *Server) authenticateInform(req *request, deviceID string) (bootstrap bo
 	}
 	if creds.DeviceID != deviceID {
 		glog.Warningf("cwmp %s: credentials of %s used by %s", req.client, creds.DeviceID, deviceID)
+		s.authFailed(req, deviceID, fmt.Sprintf("credentials of %s", creds.DeviceID))
 		http.Error(req.w, "credentials belong to another device", http.StatusForbidden)
 		return false, false
 	}
@@ -336,6 +353,7 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 		return
 	}
 	deviceID := id.DeviceID()
+	req.deviceID = deviceID
 	bootstrap, ok := s.authenticateInform(req, deviceID)
 	if !ok {
 		return
@@ -357,10 +375,12 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 	h := s.handlers.Select(info)
 	reported := h.Normalize(root, params)
 
-	if err := s.saveDevice(deviceID, id, inform.Event, h, reported, now); err != nil {
+	networkID, err := s.saveDevice(deviceID, id, inform.Event, h, reported, now)
+	if err != nil {
 		s.internalError(req, err)
 		return
 	}
+	req.networkID, req.networkKnown = networkID, true
 	if err := s.store.MergeParameters(deviceID, params, now); err != nil {
 		s.internalError(req, err)
 		return
@@ -373,6 +393,10 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 		}
 		if n > s.cfg.InformRateLimit {
 			glog.Warningf("cwmp %s: %s over %d sessions per %s", req.client, deviceID, s.cfg.InformRateLimit, s.cfg.InformRateWindow)
+			kpi.RateLimited.Inc()
+			rec := s.record(req, sessionlog.EventRateLimited, deviceID)
+			rec.Reason = fmt.Sprintf("over %d sessions per %s", s.cfg.InformRateLimit, s.cfg.InformRateWindow)
+			s.emit(rec)
 			req.w.Header().Set("Retry-After", strconv.FormatInt(windowEnd-now, 10))
 			http.Error(req.w, "too many sessions", http.StatusServiceUnavailable)
 			return
@@ -405,17 +429,19 @@ func (s *Server) handleInform(req *request, env *cwmp.Envelope, inform *cwmp.Inf
 		return
 	}
 	glog.V(1).Infof("cwmp %s: session %s for %s, events %v", req.client, sessionID, deviceID, inform.Event)
+	kpi.Sessions.Inc()
+	s.informObserved(req, sess, inform, reported)
 
 	http.SetCookie(req.w, &http.Cookie{Name: CookieName, Value: sessionID, Path: "/", HttpOnly: true, Secure: req.secure})
 	s.write(req, sess, env.ID, &cwmp.InformResponse{MaxEnvelopes: 1})
 }
 
 // saveDevice records the device and merges what its Inform reports onto its
-// normalized model.
-func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, events cwmp.EventList, h datamodel.Handler, reported *datamodel.Model, now int64) error {
+// normalized model. It returns the network that claimed the device.
+func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, events cwmp.EventList, h datamodel.Handler, reported *datamodel.Model, now int64) (string, error) {
 	prev, err := s.store.GetDevice(deviceID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	d := &storage.Device{
 		DeviceID:     deviceID,
@@ -429,7 +455,9 @@ func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, events cwmp
 	for _, e := range events {
 		d.LastInformEvents = append(d.LastInformEvents, e.EventCode)
 	}
+	networkID := ""
 	if prev != nil {
+		networkID = prev.NetworkID
 		d.Model, d.Firmware, d.ConnectionRequestURL = prev.Model, prev.Firmware, prev.ConnectionRequestURL
 		d.InformIntervalSec = prev.InformIntervalSec
 	}
@@ -446,9 +474,9 @@ func (s *Server) saveDevice(deviceID string, id cwmp.DeviceIDStruct, events cwmp
 		d.ConnectionRequestURL = v
 	}
 	if err := s.store.UpsertDevice(d); err != nil {
-		return err
+		return "", err
 	}
-	return s.mergeState(deviceID, h.Name(), reported, now)
+	return networkID, s.mergeState(deviceID, h.Name(), reported, now)
 }
 
 func (s *Server) mergeState(deviceID, handler string, m *datamodel.Model, now int64) error {

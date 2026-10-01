@@ -75,14 +75,14 @@ func newHarness(t *testing.T, cfg server.Config, replicas int) *harness {
 	return newHarnessOn(t, openSQLite(t), cfg, replicas)
 }
 
-func newHarnessOn(t *testing.T, db *sql.DB, cfg server.Config, replicas int) *harness {
+func newHarnessOn(t *testing.T, db *sql.DB, cfg server.Config, replicas int, opts ...server.Option) *harness {
 	sealer, err := storage.NewSealer(make([]byte, storage.EncryptionKeySize))
 	require.NoError(t, err)
 	store := storage.NewSQLACSStorage(db, sqorc.GetSqlBuilder(), storage.WithSealer(sealer))
 	require.NoError(t, store.Init())
 	h := &harness{t: t, store: store, served: make([]int64, replicas)}
 	for i := 0; i < replicas; i++ {
-		srv, err := server.New(cfg, store, datamodel.NewRegistry())
+		srv, err := server.New(cfg, store, datamodel.NewRegistry(), opts...)
 		require.NoError(t, err)
 		h.replicas = append(h.replicas, srv)
 	}

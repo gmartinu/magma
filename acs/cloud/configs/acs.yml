@@ -44,3 +44,14 @@ task_ttl_sec: 604800
 # have not reported ManagementServer.PeriodicInformInterval use the default.
 online_interval_multiple: 2
 online_default_interval_sec: 3600
+
+# CPE KPIs (acs_rsrp_dbm, acs_online, ...) pushed to metricsd under the
+# network of each claimed CPE.
+push_kpis: true
+# How often acs_online is pushed for every claimed CPE, so it drops to 0
+# for CPEs that stop informing.
+online_metrics_interval_sec: 300
+# fluentd in_http endpoint for the session logs (the path is the tag, which
+# fluentd writes to the acs-* indices). Empty writes them to stdout as JSON
+# lines instead.
+session_log_url: "http://fluentd:9888/acs"

@@ -420,6 +420,8 @@ func runStorageTests(t *testing.T, db *sql.DB) {
 		assert.Equal(t, []string{"F-1", "F-3"}, ids(storage.DeviceFilter{NetworkID: "claim-net"}))
 		assert.Equal(t, []string{"F-3"}, ids(storage.DeviceFilter{NetworkID: "claim-net", Model: "M-other"}))
 		assert.Equal(t, []string{"F-2"}, ids(storage.DeviceFilter{Unclaimed: true, Model: "M-claim"}))
+		assert.Equal(t, []string{"F-1"}, ids(storage.DeviceFilter{Claimed: true, Model: "M-claim"}))
+		assert.Equal(t, []string{"F-3"}, ids(storage.DeviceFilter{Claimed: true, Model: "M-other", Online: &yes}))
 
 		// A claim survives the device reporting again.
 		refreshed := *devices[0]
@@ -471,6 +473,22 @@ func runStorageTests(t *testing.T, db *sql.DB) {
 		require.NoError(t, err)
 		assert.Equal(t, "first", v)
 		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("inform total", func(t *testing.T) {
+		require.NoError(t, store.UpsertDevice(&storage.Device{DeviceID: "T-1", OUI: "T", SerialNumber: "1"}))
+		for want := int64(1); want <= 3; want++ {
+			n, err := store.IncrementInformTotal("T-1")
+			require.NoError(t, err)
+			assert.Equal(t, want, n)
+		}
+		// Refreshing the device record keeps the count.
+		require.NoError(t, store.UpsertDevice(&storage.Device{DeviceID: "T-1", OUI: "T", SerialNumber: "1", LastSeenSec: 5}))
+		n, err := store.IncrementInformTotal("T-1")
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), n)
+		_, err = store.IncrementInformTotal("T-9")
+		assert.ErrorIs(t, err, storage.ErrDeviceNotFound)
 	})
 
 	t.Run("inform rate", func(t *testing.T) {
