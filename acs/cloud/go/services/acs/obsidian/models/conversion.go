@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-openapi/strfmt"
 
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/acs/cloud/go/services/acs/tasks"
 )
@@ -82,4 +83,28 @@ func (m *AcsTaskRequest) ToArgs() tasks.Args {
 		a.ParameterValues = append(a.ParameterValues, tasks.ParameterValue{Name: p.Name, Value: p.Value, Type: p.Type})
 	}
 	return a
+}
+
+func (m *AcsSessionLog) FromRecord(r *sessionlog.Record) *AcsSessionLog {
+	t := strfmt.DateTime(time.UnixMilli(r.TimestampMs).UTC())
+	event := r.Event
+	m.Time = &t
+	m.Event = &event
+	m.DeviceID = r.DeviceID
+	m.NetworkID = r.NetworkID
+	m.SessionID = r.SessionID
+	m.SourceIP = r.SourceIP
+	m.EventCodes = r.EventCodes
+	m.Handler = r.Handler
+	m.Bootstrap = r.Bootstrap
+	m.RPC = r.RPC
+	m.TaskID = r.TaskID
+	m.TaskType = r.TaskType
+	m.FaultCode = int64(r.FaultCode)
+	m.FaultString = r.FaultString
+	m.Reason = r.Reason
+	m.DurationMs = r.DurationMs
+	m.SessionDurationSec = r.SessionDurationSec
+	m.RPCCount = int64(r.RPCCount)
+	return m
 }

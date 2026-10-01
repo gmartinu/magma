@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"magma/acs/cloud/go/acs"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/orc8r/cloud/go/services/obsidian"
 )
@@ -33,6 +34,7 @@ const (
 	ParametersPath    = DevicePath + obsidian.UrlSep + "parameters"
 	TasksPath         = DevicePath + obsidian.UrlSep + "tasks"
 	TaskPath          = TasksPath + obsidian.UrlSep + ":task_id"
+	LogsPath          = ManageNetworkPath + obsidian.UrlSep + "logs"
 )
 
 // PathPrefixes are the obsidian path prefixes the handlers are served under.
@@ -45,6 +47,8 @@ type Handlers struct {
 	TaskTTL         time.Duration
 	// Online derives the online state of devices.
 	Online storage.OnlinePolicy
+	// Logs searches the session logs; nil answers 503.
+	Logs sessionlog.Searcher
 }
 
 func NewHandlers(store storage.ACSStorage) *Handlers {
@@ -61,5 +65,6 @@ func (h *Handlers) GetHandlers() []obsidian.Handler {
 		{Path: TasksPath, Methods: obsidian.GET, HandlerFunc: h.listTasks},
 		{Path: TasksPath, Methods: obsidian.POST, HandlerFunc: h.createTask},
 		{Path: TaskPath, Methods: obsidian.GET, HandlerFunc: h.getTask},
+		{Path: LogsPath, Methods: obsidian.GET, HandlerFunc: h.listLogs},
 	}
 }
