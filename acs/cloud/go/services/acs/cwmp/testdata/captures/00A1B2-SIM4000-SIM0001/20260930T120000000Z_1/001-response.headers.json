@@ -1,0 +1,1 @@
+{"status":401,"statusMessage":"Unauthorized","headers":{"www-authenticate":"Digest realm=\"GenieACS\", qop=\"auth,auth-int\", nonce=\"abc\""}}
