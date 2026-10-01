@@ -58,7 +58,7 @@ from magma.enodebd.tests.test_utils.tr069_msg_builder import (
     Param,
     Tr069MessageBuilder,
 )
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 from parameterized import parameterized
 
 DEFAULT_INFORM_PARAMS = [

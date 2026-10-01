@@ -261,7 +261,7 @@ pytest_test(
     size = "small",
     srcs = ["spyne_mods_tests.py"],
     imports = [LTE_ROOT],
-    deps = ["//lte/gateway/python/magma/enodebd/tr069:models"],
+    deps = ["//lte/gateway/python/magma/tr069:models"],
 )
 
 pytest_test(
@@ -316,7 +316,7 @@ pytest_test(
     ],
     deps = [
         "//lte/gateway/python/magma/enodebd/tests/test_utils:enb_acs_builder",
-        "//lte/gateway/python/magma/enodebd/tr069:rpc_methods",
+        "//lte/gateway/python/magma/tr069:rpc_methods",
         requirement("lxml"),
     ],
 )

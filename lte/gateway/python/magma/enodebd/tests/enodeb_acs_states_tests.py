@@ -31,7 +31,7 @@ from magma.enodebd.state_machines.enb_acs_states import (
 from magma.enodebd.tests.test_utils.enb_acs_builder import (
     EnodebAcsStateMachineBuilder,
 )
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 
 class DummyDataModel(DataModel):

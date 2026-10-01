@@ -19,7 +19,7 @@ from magma.enodebd.tests.test_utils.enb_acs_builder import (
 )
 from magma.enodebd.tests.test_utils.enodeb_handler import EnodebHandlerTestCase
 from magma.enodebd.tests.test_utils.tr069_msg_builder import Tr069MessageBuilder
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 
 class CaviumHandlerTests(EnodebHandlerTestCase):

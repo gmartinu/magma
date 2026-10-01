@@ -22,7 +22,7 @@ from magma.enodebd.tests.test_utils.spyne_builder import (
     get_spyne_context_with_ip,
 )
 from magma.enodebd.tests.test_utils.tr069_msg_builder import Tr069MessageBuilder
-from magma.enodebd.tr069 import models
+from magma.tr069 import models
 
 
 class StateMachineManagerTests(TestCase):
