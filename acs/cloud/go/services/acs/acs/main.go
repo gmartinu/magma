@@ -21,8 +21,10 @@ import (
 	"magma/acs/cloud/go/services/acs/cwmp/server"
 	"magma/acs/cloud/go/services/acs/datamodel"
 	"magma/acs/cloud/go/services/acs/obsidian/handlers"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	acs_storage "magma/acs/cloud/go/services/acs/storage"
 	"magma/orc8r/cloud/go/service"
+	"magma/orc8r/cloud/go/services/eventd/eventd_client"
 	"magma/orc8r/cloud/go/services/obsidian"
 	swagger_protos "magma/orc8r/cloud/go/services/obsidian/swagger/protos"
 	swagger_servicers "magma/orc8r/cloud/go/services/obsidian/swagger/servicers/protected"
@@ -57,7 +59,9 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error in %s config: %s", acs_service.ServiceName, err)
 	}
-	cwmpServer, err := server.New(cwmpConfig, store, datamodel.NewRegistry())
+	kpis := serviceConfig.KPIReporter()
+	cwmpServer, err := server.New(cwmpConfig, store, datamodel.NewRegistry(),
+		server.WithKPIReporter(kpis), server.WithSessionLog(serviceConfig.SessionLogSink()))
 	if err != nil {
 		glog.Fatalf("Error creating CWMP server: %s", err)
 	}
@@ -66,10 +70,14 @@ func main() {
 		glog.Fatalf("CWMP listener on port %d stopped: %s", serviceConfig.CwmpPort, err)
 	}()
 	go cwmpServer.RunMaintenance(make(chan struct{}), serviceConfig.MaintenanceInterval())
+	if kpis != nil {
+		go kpis.RunOnlineSweep(make(chan struct{}), store, serviceConfig.OnlinePolicy(), serviceConfig.OnlineMetricsInterval())
+	}
 
 	restHandlers := handlers.NewHandlers(store)
 	restHandlers.TaskMaxAttempts, restHandlers.TaskTTL = serviceConfig.TaskDefaults()
 	restHandlers.Online = serviceConfig.OnlinePolicy()
+	restHandlers.Logs = sessionlog.NewElasticSearcher(eventd_client.GetElasticClient)
 	obsidian.AttachHandlers(srv.EchoServer, restHandlers.GetHandlers())
 	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(acs_service.ServiceName))
 

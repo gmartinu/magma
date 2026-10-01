@@ -25,6 +25,7 @@ import (
 	"magma/acs/cloud/go/services/acs/auth"
 	"magma/acs/cloud/go/services/acs/cwmp"
 	"magma/acs/cloud/go/services/acs/datamodel"
+	"magma/acs/cloud/go/services/acs/kpi"
 	"magma/acs/cloud/go/services/acs/storage"
 	"magma/acs/cloud/go/services/acs/tasks"
 	"magma/orc8r/cloud/go/clock"
@@ -46,22 +47,31 @@ func (s *Server) continueSession(req *request, sess *storage.Session, env *cwmp.
 	if env != nil {
 		switch m := env.Body.(type) {
 		case *cwmp.GetRPCMethods:
+			s.rpcObserved(req, sess, m.Method(), nil, "", "")
 			s.answerCPE(req, sess, env.ID, &cwmp.GetRPCMethodsResponse{MethodList: acsMethods})
 			return
 		case *cwmp.TransferComplete:
 			glog.Infof("%s: transfer %q complete, fault %d", sess.DeviceID, m.CommandKey, m.FaultStruct.FaultCode)
+			var fault *cwmp.Fault
+			if m.FaultStruct.FaultCode != 0 {
+				fault = cwmp.NewFault(m.FaultStruct.FaultCode, m.FaultStruct.FaultString)
+				cpeFault(fault)
+			}
+			s.rpcObserved(req, sess, m.Method(), fault, "", "")
 			s.answerCPE(req, sess, env.ID, &cwmp.TransferCompleteResponse{})
 			return
 		case *cwmp.Unknown:
 			if !strings.HasSuffix(m.Name, "Response") {
-				s.answerCPE(req, sess, env.ID, cwmp.NewFault(cwmp.FaultMethodNotSupported, "Method not supported"))
+				fault := cwmp.NewFault(cwmp.FaultMethodNotSupported, "Method not supported")
+				s.rpcObserved(req, sess, m.Name, fault, "", "")
+				s.answerCPE(req, sess, env.ID, fault)
 				return
 			}
 		}
 	}
 
 	if sess.PendingID != "" {
-		if err := s.handleAnswer(sess, env); err != nil {
+		if err := s.handleAnswer(req, sess, env); err != nil {
 			s.internalError(req, err)
 			return
 		}
@@ -82,7 +92,7 @@ func (s *Server) answerCPE(req *request, sess *storage.Session, id string, msg c
 
 // handleAnswer processes the CPE's answer to the pending ACS request. A nil
 // env is an empty POST where an answer was due.
-func (s *Server) handleAnswer(sess *storage.Session, env *cwmp.Envelope) error {
+func (s *Server) handleAnswer(req *request, sess *storage.Session, env *cwmp.Envelope) error {
 	pendingMethod := sess.PendingMethod
 	sess.PendingID, sess.PendingMethod = "", ""
 
@@ -92,6 +102,7 @@ func (s *Server) handleAnswer(sess *storage.Session, env *cwmp.Envelope) error {
 		fault = cwmp.NewFault(cwmp.FaultInternalError, fmt.Sprintf("CPE sent an empty POST instead of answering %s", pendingMethod))
 	} else if f, ok := env.Body.(*cwmp.Fault); ok {
 		fault = f
+		cpeFault(f)
 	} else if env.Body.Method() != pendingMethod+"Response" {
 		fault = cwmp.NewFault(cwmp.FaultInternalError, fmt.Sprintf("CPE answered %s with %s", pendingMethod, env.Body.Method()))
 	} else {
@@ -102,9 +113,13 @@ func (s *Server) handleAnswer(sess *storage.Session, env *cwmp.Envelope) error {
 	retryable := env == nil || answer == nil && env.Body.Method() != "Fault"
 
 	if sess.PendingTaskID == "" {
+		s.rpcObserved(req, sess, pendingMethod, fault, "", "")
 		return s.rotationAnswered(sess, fault)
 	}
-	return s.taskAnswered(sess, answer, fault, retryable)
+	taskID := sess.PendingTaskID
+	taskType, err := s.taskAnswered(sess, answer, fault, retryable)
+	s.rpcObserved(req, sess, pendingMethod, fault, taskID, taskType)
+	return err
 }
 
 // next sends the next ACS request of the session, or ends it.
@@ -120,6 +135,7 @@ func (s *Server) next(req *request, sess *storage.Session) {
 			return
 		}
 		glog.V(1).Infof("%s: session %s done", sess.DeviceID, sess.SessionID)
+		s.sessionEnded(req, sess)
 		http.SetCookie(req.w, &http.Cookie{Name: CookieName, Value: "", Path: "/", MaxAge: -1})
 		req.w.WriteHeader(http.StatusNoContent)
 		return
@@ -187,15 +203,21 @@ func (s *Server) plan(task *storage.Task, sess *storage.Session) ([]cwmp.Message
 	return tasks.Plan(task.Type, args, s.handlers.Get(sess.Handler), sess.Root, task.TaskID)
 }
 
-func (s *Server) taskAnswered(sess *storage.Session, answer cwmp.Message, fault *cwmp.Fault, retryable bool) error {
+// taskAnswered applies the answer to the pending task and returns the task
+// type, "" when the task is gone.
+func (s *Server) taskAnswered(sess *storage.Session, answer cwmp.Message, fault *cwmp.Fault, retryable bool) (string, error) {
 	task, err := s.store.GetTask(sess.PendingTaskID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if task == nil || task.Status != storage.TaskInProgress || task.SessionID != sess.SessionID {
 		sess.PendingTaskID, sess.TaskStep = "", 0
-		return nil
+		return "", nil
 	}
+	return task.Type, s.applyAnswer(sess, task, answer, fault, retryable)
+}
+
+func (s *Server) applyAnswer(sess *storage.Session, task *storage.Task, answer cwmp.Message, fault *cwmp.Fault, retryable bool) error {
 	result, err := tasks.ParseResult(task.Result)
 	if err != nil {
 		result = tasks.Result{}
@@ -354,6 +376,7 @@ func (s *Server) refreshDevice(deviceID string, m *datamodel.Model) error {
 	if err != nil || d == nil {
 		return err
 	}
+	s.kpis.Report(d.NetworkID, kpi.Samples(deviceID, m))
 	updated := *d
 	if v := m.Identity.ModelName; v != "" {
 		updated.Model = v
