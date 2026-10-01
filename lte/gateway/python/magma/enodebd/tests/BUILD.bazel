@@ -257,14 +257,6 @@ pytest_test(
 )
 
 pytest_test(
-    name = "spyne_mods_tests",
-    size = "small",
-    srcs = ["spyne_mods_tests.py"],
-    imports = [LTE_ROOT],
-    deps = ["//lte/gateway/python/magma/tr069:models"],
-)
-
-pytest_test(
     name = "stats_manager_tests",
     size = "small",
     srcs = ["stats_manager_tests.py"],

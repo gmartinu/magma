@@ -32,6 +32,14 @@ pytest_test(
 )
 
 pytest_test(
+    name = "models_tests",
+    size = "small",
+    srcs = ["models_tests.py"],
+    imports = [LTE_ROOT],
+    deps = ["//lte/gateway/python/magma/tr069:models"],
+)
+
+pytest_test(
     name = "server_tests",
     size = "small",
     srcs = ["server_tests.py"],
@@ -42,5 +50,16 @@ pytest_test(
     deps = [
         "//lte/gateway/python/magma/tr069:logger",
         "//lte/gateway/python/magma/tr069:server",
+    ],
+)
+
+pytest_test(
+    name = "spyne_mods_tests",
+    size = "small",
+    srcs = ["spyne_mods_tests.py"],
+    imports = [LTE_ROOT],
+    deps = [
+        "//lte/gateway/python/magma/tr069:models",
+        "//lte/gateway/python/magma/tr069:spyne_mods",
     ],
 )
