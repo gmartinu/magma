@@ -22,6 +22,10 @@ magma-gen-meta:
       filename: acs_inform_swaggergen.go
     - go-struct-name: AcsParameter
       filename: acs_parameter_swaggergen.go
+    - go-struct-name: AcsSessionLog
+      filename: acs_session_log_swaggergen.go
+    - go-struct-name: AcsSessionLogs
+      filename: acs_session_logs_swaggergen.go
 
 info:
   title: ACS
@@ -189,6 +193,51 @@ paths:
           description: The task
           schema:
             $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/logs:
+    get:
+      summary: Search the CWMP session logs of a network
+      description: >
+        One record per CWMP exchange of the network's CPEs (Inform, each RPC,
+        session end, auth failure, rate limit), newest first, from the acs-*
+        Elasticsearch indices. Records of a CPE before it was claimed carry no
+        network and are not listed. Indices are kept for the Elasticsearch
+        retention (7 days by default).
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - in: query
+          name: device_id
+          description: Only records of this CPE (OUI-ProductClass-SerialNumber)
+          required: false
+          type: string
+        - in: query
+          name: begin
+          description: Only records at or after this time (RFC 3339)
+          required: false
+          type: string
+          format: date-time
+        - in: query
+          name: end
+          description: Only records at or before this time (RFC 3339)
+          required: false
+          type: string
+          format: date-time
+        - in: query
+          name: size
+          description: Maximum number of records returned (1-1000, default 50)
+          required: false
+          type: integer
+          minimum: 1
+          maximum: 1000
+      responses:
+        '200':
+          description: Session log records
+          schema:
+            $ref: '#/definitions/acs_session_logs'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
@@ -470,3 +519,84 @@ definitions:
       deadline:
         type: string
         format: date-time
+
+  acs_session_logs:
+    description: A page of session log records
+    type: object
+    x-nullable: false
+    required:
+      - total_count
+      - logs
+    properties:
+      total_count:
+        description: Records matching the query, beyond the page size
+        type: integer
+        format: int64
+      logs:
+        type: array
+        items:
+          $ref: '#/definitions/acs_session_log'
+
+  acs_session_log:
+    description: One CWMP exchange of a CPE
+    type: object
+    x-nullable: false
+    required:
+      - time
+      - event
+    properties:
+      time:
+        type: string
+        format: date-time
+      event:
+        type: string
+        enum:
+          - inform
+          - rpc
+          - session_end
+          - auth_failure
+          - rate_limited
+      device_id:
+        type: string
+      network_id:
+        type: string
+      session_id:
+        type: string
+      source_ip:
+        type: string
+      event_codes:
+        description: Inform event codes, e.g. 2 PERIODIC
+        type: array
+        items:
+          type: string
+      handler:
+        description: Data model handler serving the CPE
+        type: string
+      bootstrap:
+        description: The session authenticated with the bootstrap credentials
+        type: boolean
+      rpc:
+        description: The CPE request, or the ACS request the CPE answered
+        type: string
+      task_id:
+        type: string
+      task_type:
+        type: string
+      fault_code:
+        type: integer
+      fault_string:
+        type: string
+      reason:
+        description: Why the request was refused
+        type: string
+      duration_ms:
+        description: Time the ACS took to handle the request
+        type: integer
+        format: int64
+      session_duration_sec:
+        description: Length of the session, on session_end
+        type: integer
+        format: int64
+      rpc_count:
+        description: ACS requests sent in the session, on session_end
+        type: integer
