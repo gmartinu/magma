@@ -36,6 +36,9 @@ type Credentials struct {
 	// ACSUsername and ACSPasswordHash authenticate the CPE to the ACS.
 	ACSUsername     string
 	ACSPasswordHash string
+	// PendingPasswordHash is a rotated password the CPE has been sent but not
+	// yet confirmed. It is accepted next to the current one until it is.
+	PendingPasswordHash string
 	// ConnReqUsername and ConnReqPassword authenticate the ACS to the CPE on
 	// a connection request.
 	ConnReqUsername string
@@ -43,14 +46,88 @@ type Credentials struct {
 	UpdatedSec      int64
 }
 
+// Session steps.
+const (
+	// SessionCPERequests is the step after the InformResponse, while the CPE
+	// may still send its own requests.
+	SessionCPERequests = "cpe_requests"
+	// SessionACSRequests is the step after the CPE's empty POST, while the
+	// ACS drives the session.
+	SessionACSRequests = "acs_requests"
+)
+
 // Session is server-side CWMP session state keyed by the session cookie, so
 // that any replica can continue a session.
 type Session struct {
-	SessionID  string
-	DeviceID   string
-	Step       string
+	SessionID string
+	DeviceID  string
+	Step      string
+	// Namespace is the cwmp namespace of the CPE, used for every answer.
+	Namespace string
+	// Root is the data model root of the CPE and Handler its handler.
+	Root    string
+	Handler string
+	// Bootstrap is set when the CPE authenticated with the shared bootstrap
+	// credentials.
+	Bootstrap bool
+	// RotationSent is set once the ACS sent new credentials in the session.
+	RotationSent bool
+	// PendingID and PendingMethod describe the ACS request awaiting an answer.
+	PendingID     string
+	PendingMethod string
+	// PendingTaskID and TaskStep locate the task RPC being executed.
+	PendingTaskID string
+	TaskStep      int
+	// RequestSeq numbers the ACS requests of the session.
+	RequestSeq int
 	CreatedSec int64
 	ExpiresSec int64
+}
+
+// Task states.
+const (
+	TaskPending    = "pending"
+	TaskInProgress = "in_progress"
+	TaskDone       = "done"
+	TaskFailed     = "failed"
+	TaskExpired    = "expired"
+)
+
+// Task is an operation queued for a CPE and executed in its next session.
+type Task struct {
+	TaskID    string
+	DeviceID  string
+	NetworkID string
+	Type      string
+	// Args and Result are JSON documents whose shape depends on Type.
+	Args        string
+	Status      string
+	Attempts    int
+	MaxAttempts int
+	// SessionID is the session executing the task while it is in progress,
+	// or the session whose retryable fault requeued it.
+	SessionID   string
+	FaultCode   int
+	FaultString string
+	Result      string
+	CreatedSec  int64
+	UpdatedSec  int64
+	DeadlineSec int64
+}
+
+// DeviceState is the last normalized model of a device, as JSON.
+type DeviceState struct {
+	DeviceID   string
+	Handler    string
+	Model      string
+	UpdatedSec int64
+}
+
+// ReapResult counts what ReapExpired cleaned up.
+type ReapResult struct {
+	Sessions      int
+	RequeuedTasks int
+	ExpiredTasks  int
 }
 
 // ACSStorage is the persistence layer of the acs service.
@@ -68,14 +145,59 @@ type ACSStorage interface {
 
 	// PutCredentials creates or replaces the credentials of a device.
 	PutCredentials(creds *Credentials) error
+	// GetCredentials returns the credentials of a device, or nil.
+	GetCredentials(deviceID string) (*Credentials, error)
 	// GetCredentialsByUsername returns the credentials for an ACS username,
 	// or nil if there are none.
 	GetCredentialsByUsername(acsUsername string) (*Credentials, error)
+	// DeleteCredentials removes the credentials of a device, which returns it
+	// to the bootstrap credentials.
+	DeleteCredentials(deviceID string) error
 
 	// PutSession creates or replaces a session.
 	PutSession(session *Session) error
 	// GetSession returns an unexpired session, or nil if there is none.
 	GetSession(sessionID string) (*Session, error)
-	// DeleteExpiredSessions removes all expired sessions.
-	DeleteExpiredSessions() error
+	// GetDeviceSession returns the newest unexpired session of a device, or
+	// nil.
+	GetDeviceSession(deviceID string) (*Session, error)
+	// EndSession removes a session and requeues the task it was executing.
+	EndSession(sessionID string, reason string) error
+	// EndDeviceSessions ends every session of a device, e.g. when it starts
+	// a new one.
+	EndDeviceSessions(deviceID string, reason string) error
+	// ReapExpired ends the expired sessions, requeues their tasks and tasks
+	// left in progress by a session that no longer exists, and expires the
+	// pending tasks past their deadline.
+	ReapExpired() (ReapResult, error)
+
+	// CreateTask queues a task. Tasks of a device run in creation order.
+	CreateTask(task *Task) error
+	// GetTask returns a task, or nil.
+	GetTask(taskID string) (*Task, error)
+	// ListTasks returns the tasks of a device in creation order.
+	ListTasks(deviceID string) ([]*Task, error)
+	// ClaimNextTask locks the oldest runnable task of the device, marks it in
+	// progress in the session and returns it, or nil if there is none. A task
+	// requeued by a fault in the same session is not runnable in it.
+	ClaimNextTask(deviceID, sessionID string) (*Task, error)
+	// SaveTaskResult stores the partial result of a multi-RPC task.
+	SaveTaskResult(taskID, result string) error
+	// CompleteTask marks a task done with its result.
+	CompleteTask(taskID, result string) error
+	// FailTask records a fault. A retryable fault requeues the task while it
+	// has attempts left and is before its deadline; otherwise it fails.
+	FailTask(taskID string, faultCode int, faultString string, retryable bool) error
+
+	// PutDeviceState stores the normalized model of a device.
+	PutDeviceState(state *DeviceState) error
+	// GetDeviceState returns the normalized model of a device, or nil.
+	GetDeviceState(deviceID string) (*DeviceState, error)
+
+	// GetOrCreateSecret returns the named secret shared by every replica,
+	// creating it with generate on first use.
+	GetOrCreateSecret(name string, generate func() (string, error)) (string, error)
+	// CountInform counts an Inform of a device in fixed windows of windowSec
+	// and returns the count in the current window and when it ends.
+	CountInform(deviceID string, windowSec int64) (count int, windowEndSec int64, err error)
 }
