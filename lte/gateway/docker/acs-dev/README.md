@@ -90,6 +90,72 @@ from lte.protos.cpe_acs_pb2_grpc import CpeManagerStub; \
 print(CpeManagerStub(grpc.insecure_channel('127.0.0.1:50086')).ListCpes(pb.ListCpesRequest()))"
 ```
 
+## End to end with a local Orc8r
+
+`orc8r/` runs a minimal Orc8r (postgres, the controller with every module,
+the nginx proxy) and `docker-compose.orc8r.yaml` adds magmad and
+control_proxy to this env, so the path NMS -> Orc8r REST -> SyncRPC ->
+magmad -> acsd and acsd's `cpe_acs` state -> Orc8r both run on the Mac.
+
+Build the images once, natively (the controller Dockerfile picks arm64 Go
+and protoc by itself; about 6 minutes on 4 CPUs):
+
+```bash
+cd orc8r/cloud/docker
+python3 -c "import build; build.HOST_BUILD_CTX='/tmp/magma_orc8r_build'; \
+  build._create_build_context(build._get_modules(build.MODULES))"
+docker buildx build --platform linux/arm64 --build-arg PLATFORM=linux/arm64 \
+  -f controller/Dockerfile -t orc8r_controller:acs-e2e-arm64 --load /tmp/magma_orc8r_build
+docker buildx build -f nginx/Dockerfile -t orc8r_nginx:acs-e2e-arm64 --load /tmp/magma_orc8r_build
+```
+
+Then, with this env already up (it owns the `acs-dev_acsnet` network):
+
+```bash
+(cd orc8r && docker compose up -d && ./setup.sh)   # network acs_e2e, gateway agw1, tenant 1
+docker compose -f docker-compose.yaml -f docker-compose.orc8r.yaml up -d magmad control_proxy
+docker compose run --rm cpe-sim                    # CPEs report to Orc8r
+```
+
+The REST API is `https://localhost:9443/magma/v1`, with the admin cert
+`orc8r/.certs/admin_operator.pem` + `.key.pem` (or `admin_operator.pfx`,
+password `magma`, in a browser):
+
+```bash
+C="--cert orc8r/.certs/admin_operator.pem --key orc8r/.certs/admin_operator.key.pem -k"
+curl $C https://localhost:9443/magma/v1/acs/acs_e2e/cpes
+curl $C -X POST -H 'Content-Type: application/json' -d '{"type":"reboot"}' \
+  https://localhost:9443/magma/v1/acs/acs_e2e/cpes/IMSI001010000000001/tasks
+docker compose run --rm --entrypoint python3 cpe-sim \
+  /magma/lte/gateway/docker/acs-dev/orc8r/cpe_session.py   # the CPE's next session runs it
+```
+
+NMS (optional): `(cd orc8r && docker compose --profile nms up -d nms-db)`,
+then in `nms/` with `API_HOST=localhost:9443`, `API_CERT_FILENAME` /
+`API_PRIVATE_KEY_FILENAME` = the admin cert above,
+`NODE_TLS_REJECT_UNAUTHORIZED=0`, and `MYSQL_DIALECT=postgres MYSQL_HOST=127.0.0.1
+MYSQL_PORT=55432 MYSQL_USER=nms MYSQL_PASS=nms MYSQL_DB=nms PORT=8081`: `yarn
+migrate`, `yarn setAdminPassword host admin@magma.test password1234`, `yarn
+createOrganization acs-e2e acs_e2e`, `yarn setAdminPassword acs-e2e
+admin@magma.test password1234`, then `yarn start:dev`. The NMS mirrors each
+organization to an Orc8r tenant with the organization's ID, so entitle that
+tenant (`PUT /tenants/{id}/entitlements/acs`), and turn on the `acs` feature
+flag for the organization (host portal, Features).
+
+Entitlements are not enforced: `orc8r/overrides/orc8r/entitlements.yml`.
+Set `enforce: true`, then `docker compose exec controller supervisorctl
+restart entitlements` (in `orc8r/`).
+
+magmad runs with `init_system: docker` but no Docker socket, so it cannot
+restart services: the mconfig it streams lands in its own config volume and
+acsd keeps the static dev mconfig.
+
+Stop: `docker compose -f docker-compose.yaml -f docker-compose.orc8r.yaml
+stop magmad control_proxy` and `(cd orc8r && docker compose down)`
+(`down -v` also drops the Orc8r DB; `rm -rf orc8r/.certs orc8r/.agw` resets
+the certs and the gateway identity, after which setup.sh registers a new
+one).
+
 ## Not possible on macOS Docker Desktop
 
 The LinuxKit VM kernel ships no `openvswitch` module (`modprobe openvswitch`
