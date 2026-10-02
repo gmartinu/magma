@@ -25,20 +25,19 @@ replace (
 )
 
 require (
-	github.com/Masterminds/squirrel v1.1.1-0.20190513200039-d13326f0be73
 	github.com/go-openapi/errors v0.20.2
 	github.com/go-openapi/strfmt v0.21.1
 	github.com/go-openapi/swag v0.19.15
 	github.com/go-openapi/validate v0.20.3
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/labstack/echo/v4 v4.9.0
-	github.com/stretchr/testify v1.7.0
-	magma/orc8r/cloud/go v0.0.0-00010101000000-000000000000
-	magma/orc8r/lib/go v0.0.0-00010101000000-000000000000
-	magma/orc8r/lib/go/protos v0.0.0
+	magma/lte/cloud/go v0.0.0-00010101000000-000000000000
+	magma/orc8r/cloud/go v0.0.0
+	magma/orc8r/lib/go v0.0.0
 )
 
 require (
+	github.com/Masterminds/squirrel v1.1.1-0.20190513200039-d13326f0be73 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
@@ -52,7 +51,7 @@ require (
 	github.com/go-openapi/loads v0.21.0 // indirect
 	github.com/go-openapi/runtime v0.21.1 // indirect
 	github.com/go-openapi/spec v0.20.4 // indirect
-	github.com/go-sql-driver/mysql v1.5.0 // indirect
+	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -85,6 +84,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
+	github.com/stretchr/testify v1.7.1 // indirect
 	github.com/thoas/go-funk v0.7.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.1 // indirect
@@ -101,4 +101,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	magma/gateway v0.0.0 // indirect
+	magma/orc8r/lib/go/protos v0.0.0 // indirect
 )
