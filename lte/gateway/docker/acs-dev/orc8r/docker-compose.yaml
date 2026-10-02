@@ -1,0 +1,113 @@
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Minimal Orc8r for the ACS end-to-end dev env: postgres + the controller
+# (every module, acs included) + the nginx proxy. The proxy also joins the
+# acs-dev network as controller.magma.test, so magmad and control_proxy
+# from ../docker-compose.orc8r.yaml reach it. Start acs-dev first (it owns
+# that network). See ../README.md.
+name: acs-orc8r
+
+services:
+  postgres:
+    image: postgres:14
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: magma_dev
+      POSTGRES_PASSWORD: magma_dev
+      POSTGRES_DB: magma_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "magma_dev"]
+      interval: 3s
+      retries: 20
+    cpus: 1
+    mem_limit: 512m
+
+  controller:
+    image: ${ORC8R_CONTROLLER_IMAGE:-orc8r_controller:acs-e2e-arm64}
+    volumes:
+      - ./.certs:/var/opt/magma/certs
+      - ../../../../../orc8r/cloud/docker/controller/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf:ro
+      # entitlements.yml lives here: edit enforce, then
+      # `docker compose exec controller supervisorctl restart entitlements`.
+      - ./overrides:/var/opt/magma/configs:ro
+    environment:
+      TEST_MODE: "1"  # creates the test certs and the admin_operator
+      SERVICE_HOSTNAME: localhost
+      SQL_DRIVER: postgres
+      DATABASE_SOURCE: "dbname=magma_dev user=magma_dev password=magma_dev host=postgres sslmode=disable"
+      SQL_DIALECT: psql
+      SERVICE_REGISTRY_MODE: yaml
+      ORC8R_DOMAIN_NAME: magma.test
+      VERSION_TAG: LOCAL-DEV
+      HELM_VERSION_TAG: LOCAL-DEV
+      MAGMA_PRINT_GRPC_PAYLOAD: 0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/bin/sh", "-c", "/usr/local/bin/wait-for-it.sh -s -t 30 postgres:5432 && exec /usr/bin/supervisord"]
+    cpus: 2
+    mem_limit: 2g
+
+  nginx:
+    image: ${ORC8R_NGINX_IMAGE:-orc8r_nginx:acs-e2e-arm64}
+    ports:
+      - "127.0.0.1:9443:9443"   # REST API (admin_operator client cert)
+      - "127.0.0.1:7443:8443"   # gateway gRPC
+      - "127.0.0.1:7444:8444"   # bootstrapper
+    volumes:
+      - ./.certs:/var/opt/magma/certs
+    environment:
+      CONTROLLER_HOSTNAME: controller.magma.test
+      PROXY_BACKENDS: controller
+      TEST_MODE: "1"
+      RESOLVER: 127.0.0.11
+      SERVICE_REGISTRY_MODE: yaml
+      SSL_CERTIFICATE: /var/opt/magma/certs/controller.crt
+      SSL_CERTIFICATE_KEY: /var/opt/magma/certs/controller.key
+      SSL_CLIENT_CERTIFICATE: /var/opt/magma/certs/certifier.pem
+    networks:
+      default:
+      acsnet:
+        aliases:
+          - controller.magma.test
+          - bootstrapper-controller.magma.test
+    depends_on:
+      - controller
+    cpus: 0.5
+    mem_limit: 256m
+
+  # Database for the NMS dev server (`yarn start:dev` on the host, see
+  # ../README.md): `docker compose --profile nms up -d nms-db`.
+  nms-db:
+    image: postgres:14
+    profiles: [nms]
+    environment:
+      POSTGRES_USER: nms
+      POSTGRES_PASSWORD: nms
+      POSTGRES_DB: nms
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - nmsdata:/var/lib/postgresql/data
+    cpus: 0.5
+    mem_limit: 256m
+
+networks:
+  acsnet:
+    external: true
+    name: acs-dev_acsnet
+
+volumes:
+  pgdata:
+  nmsdata:
