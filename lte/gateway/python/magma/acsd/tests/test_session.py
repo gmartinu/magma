@@ -54,7 +54,7 @@ class CwmpSessionHandlerTest(unittest.TestCase):
         self.assertIsInstance(resp, models.DummyInput)
 
     def test_identify_gets_source_ip_and_inform(self):
-        identify = mock.Mock(return_value=True)
+        identify = mock.Mock(return_value='IMSI001010000000001')
         inform = _inform()
         CwmpSessionHandler(identify).handle_tr069_message(
             _ctx('192.168.128.40'), inform,
@@ -62,7 +62,7 @@ class CwmpSessionHandlerTest(unittest.TestCase):
         identify.assert_called_once_with('192.168.128.40', inform)
 
     def test_identify_only_runs_on_inform(self):
-        identify = mock.Mock(return_value=True)
+        identify = mock.Mock(return_value='IMSI001010000000001')
         CwmpSessionHandler(identify).handle_tr069_message(
             _ctx(), models.DummyInput(),
         )
@@ -70,7 +70,7 @@ class CwmpSessionHandlerTest(unittest.TestCase):
 
     def test_refused_session_is_403_without_inform_response(self):
         ctx = _ctx()
-        resp = CwmpSessionHandler(lambda ip, inform: False) \
+        resp = CwmpSessionHandler(lambda ip, inform: None) \
             .handle_tr069_message(ctx, _inform())
         self.assertIsInstance(resp, models.DummyInput)
         self.assertEqual(ctx.transport.resp_code, HTTP_403)
@@ -81,5 +81,31 @@ class CwmpSessionHandlerTest(unittest.TestCase):
         )
         self.assertIsInstance(resp, models.InformResponse)
 
-    def test_accept_all(self):
-        self.assertTrue(accept_all('10.0.0.1', _inform()))
+    def test_accept_all_keys_by_source_ip(self):
+        self.assertEqual(accept_all('10.0.0.1', _inform()), '10.0.0.1')
+
+
+class SessionIdentityTest(unittest.TestCase):
+    IMSI = 'IMSI001010000000001'
+
+    def setUp(self):
+        self.identity = self.IMSI
+        self.handler = CwmpSessionHandler(lambda ip, inform: self.identity)
+
+    def test_identity_held_after_inform(self):
+        self.handler.handle_tr069_message(_ctx('10.1.0.5'), _inform())
+        self.assertEqual(self.handler.session_identity('10.1.0.5'), self.IMSI)
+        self.assertIsNone(self.handler.session_identity('10.1.0.6'))
+
+    def test_session_end_drops_identity(self):
+        self.handler.handle_tr069_message(_ctx('10.1.0.5'), _inform())
+        self.handler.handle_tr069_message(
+            _ctx('10.1.0.5'), models.DummyInput(),
+        )
+        self.assertIsNone(self.handler.session_identity('10.1.0.5'))
+
+    def test_refused_inform_drops_previous_identity(self):
+        self.handler.handle_tr069_message(_ctx('10.1.0.5'), _inform())
+        self.identity = None
+        self.handler.handle_tr069_message(_ctx('10.1.0.5'), _inform())
+        self.assertIsNone(self.handler.session_identity('10.1.0.5'))

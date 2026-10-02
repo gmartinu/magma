@@ -18,6 +18,7 @@ from typing import List
 
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.config import CwmpBind, get_cwmp_bind, get_cwmp_workers
+from magma.acsd.identity import SessionIdentifier
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
 from magma.common.sentry import sentry_init
@@ -66,8 +67,8 @@ def main():
     config = load_service_config('acsd')
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
-    # identify defaults to accept-all until the mobilityd lookup is wired in.
-    start_cwmp_listener(bind, CwmpSessionHandler(), workers)
+    handler = CwmpSessionHandler(identify=SessionIdentifier())
+    start_cwmp_listener(bind, handler, workers)
     logging.info(
         'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',
         mconfigs_pb2.AcsD.Mode.Name(service.mconfig.mode),
