@@ -40,6 +40,7 @@ MODULES = (
     'feg',
     'cwf',
     'dp',
+    'acs',
 )
 
 DEPLOYMENT_TO_MODULES = MappingProxyType({

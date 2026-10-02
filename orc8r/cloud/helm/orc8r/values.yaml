@@ -359,3 +359,12 @@ dp:
       grpc_service: 'domain-proxy-radio-controller'
       grpc_port: 50053
       cbsd_inactivity_interval_sec: 14400
+
+acs:
+  enabled: false
+  service:
+    labels:
+      orc8r.io/obsidian_handlers: "true"
+      orc8r.io/swagger_spec: "true"
+    annotations:
+      orc8r.io/obsidian_handlers_path_prefixes: /magma/v1/acs/:network_id

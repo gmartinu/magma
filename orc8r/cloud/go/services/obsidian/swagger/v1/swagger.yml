@@ -18,6 +18,8 @@ securityDefinitions:
 security:
 - tokenAuth: []
 tags:
+- description: TR-069 CPEs of a network, as reported by its AGWs
+  name: ACS
 - description: Access point name
   name: APNs
 - description: Version info
@@ -75,6 +77,145 @@ paths:
       summary: Get version
       tags:
       - About
+  /acs/{network_id}/cpes:
+    get:
+      description: |
+        Read from the cpe_acs state each AGW reports, so CPEs of an AGW that is offline still appear, with online false once the report is stale.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - description: Only CPEs whose model_name or product_class is exactly this
+        in: query
+        name: model
+        required: false
+        type: string
+      - description: Only CPEs that are (true) or are not (false) online
+        in: query
+        name: online
+        required: false
+        type: boolean
+      - description: Only CPEs reported by this gateway
+        in: query
+        name: gateway_id
+        required: false
+        type: string
+      - description: Only CPEs of this identity mode
+        enum:
+        - core
+        - claimed
+        in: query
+        name: mode
+        required: false
+        type: string
+      responses:
+        "200":
+          description: CPEs of the network, ordered by cpe_key
+          schema:
+            items:
+              $ref: '#/definitions/acs_cpe'
+            type: array
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: List the CPEs the AGWs of the network report
+      tags:
+      - ACS
+  /acs/{network_id}/cpes/{cpe_key}:
+    get:
+      description: From the reported state; works while the AGW is offline.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      responses:
+        "200":
+          description: The CPE
+          schema:
+            $ref: '#/definitions/acs_cpe_detail'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Get a CPE with its normalized model
+      tags:
+      - ACS
+  /acs/{network_id}/cpes/{cpe_key}/parameters:
+    get:
+      description: Read live from acsd on the CPE's AGW; 503 when the AGW is unreachable.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      - description: Only parameters whose name starts with it, e.g. Device.Cellular.
+        in: query
+        name: prefix
+        required: false
+        type: string
+      responses:
+        "200":
+          description: Parameters of the CPE, ordered by name
+          schema:
+            items:
+              $ref: '#/definitions/acs_parameter'
+            type: array
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: List the raw TR-069 parameters acsd last read from a CPE
+      tags:
+      - ACS
+  /acs/{network_id}/cpes/{cpe_key}/tasks:
+    get:
+      description: Read live from acsd on the CPE's AGW; 503 when the AGW is unreachable.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      responses:
+        "200":
+          description: Tasks of the CPE
+          schema:
+            items:
+              $ref: '#/definitions/acs_task'
+            type: array
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: List the tasks of a CPE in run order
+      tags:
+      - ACS
+    post:
+      description: |
+        Relayed to acsd on the AGW that last reported the CPE. 400 for a malformed task, 404 for a CPE no AGW reports, 503 when the AGW is unreachable.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      - in: body
+        name: task
+        required: true
+        schema:
+          $ref: '#/definitions/acs_task_request'
+      responses:
+        "201":
+          description: The queued task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Queue a task, run in the next CWMP session of the CPE
+      tags:
+      - ACS
+  /acs/{network_id}/cpes/{cpe_key}/tasks/{task_id}:
+    get:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      - description: Task ID returned when the task was queued
+        in: path
+        name: task_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: The task
+          schema:
+            $ref: '#/definitions/acs_task'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Get a task of a CPE
+      tags:
+      - ACS
   /channels:
     get:
       responses:
@@ -6311,6 +6452,13 @@ responses:
     schema:
       $ref: '#/definitions/error'
 parameters:
+  acs_cpe_key:
+    description: |
+      acsd's key of the CPE: IMSI<digits> for a CPE on the Magma core, CLAIM<id> for a claimed CPE
+    in: path
+    name: cpe_key
+    required: true
+    type: string
   apn_name:
     description: Access Point Name
     in: path
@@ -6520,6 +6668,274 @@ definitions:
         x-nullable: false
       radius_config:
         $ref: '#/definitions/radius_config'
+    type: object
+  acs_cpe:
+    description: A TR-069 CPE as last reported by its AGW
+    properties:
+      cpe_key:
+        example: IMSI001010000000001
+        minLength: 1
+        type: string
+        x-nullable: false
+      gateway_id:
+        description: Gateway whose acsd last reported the CPE; empty if unregistered
+        type: string
+        x-nullable: false
+      handler:
+        description: Datamodel handler acsd serves the CPE with
+        type: string
+      hardware_id:
+        description: Hardware ID of that gateway
+        type: string
+      imsi:
+        description: Empty when unknown (a claimed CPE that did not report its SIM)
+        example: IMSI001010000000001
+        type: string
+      informs_total:
+        format: int64
+        type: integer
+      last_inform:
+        description: When the CPE last sent an Inform; absent if never
+        format: date-time
+        type: string
+        x-nullable: true
+      last_session:
+        $ref: '#/definitions/acs_cpe_session'
+      mode:
+        enum:
+        - core
+        - claimed
+        type: string
+        x-nullable: false
+      model_name:
+        description: ModelName the CPE reported, from the normalized model
+        type: string
+      online:
+        description: |
+          Whether the last Inform is at most two periodic inform intervals old, as acsd computed it; false when the AGW report is stale
+        type: boolean
+        x-nullable: false
+      oui:
+        example: 00259E
+        type: string
+      pending_tasks:
+        format: int32
+        type: integer
+      product_class:
+        example: Titan4000
+        type: string
+      reported_at:
+        description: When the AGW last reported the CPE's state
+        format: date-time
+        type: string
+        x-nullable: false
+      serial_number:
+        example: ABC123456
+        type: string
+      software_version:
+        type: string
+    required:
+    - cpe_key
+    - mode
+    - online
+    - gateway_id
+    - reported_at
+    type: object
+    x-nullable: false
+  acs_cpe_detail:
+    description: A CPE with its normalized model
+    properties:
+      cpe:
+        $ref: '#/definitions/acs_cpe'
+      model:
+        description: |
+          Vendor-independent model of the CPE (identity, cellular, wan, management_server, ...)
+        type: object
+    required:
+    - cpe
+    type: object
+    x-nullable: false
+  acs_cpe_session:
+    description: How the last CWMP session of a CPE ended
+    properties:
+      ended:
+        format: date-time
+        type: string
+        x-nullable: true
+      faults:
+        format: int32
+        type: integer
+      reason:
+        type: string
+      result:
+        description: completed, timed_out or interrupted
+        type: string
+      session_id:
+        type: string
+      started:
+        format: date-time
+        type: string
+        x-nullable: true
+      tasks_done:
+        format: int32
+        type: integer
+      tasks_failed:
+        format: int32
+        type: integer
+    type: object
+  acs_parameter:
+    description: A raw TR-069 parameter as acsd last read it
+    properties:
+      name:
+        example: Device.Cellular.Interface.1.RSRP
+        type: string
+        x-nullable: false
+      value:
+        example: "-95"
+        type: string
+        x-nullable: false
+    required:
+    - name
+    - value
+    type: object
+    x-nullable: false
+  acs_parameter_value:
+    description: A TR-069 parameter and the value to set
+    properties:
+      name:
+        example: Device.ManagementServer.PeriodicInformInterval
+        minLength: 1
+        type: string
+        x-nullable: false
+      type:
+        description: xsd type of the value, xsd:string when empty
+        example: xsd:unsignedInt
+        type: string
+      value:
+        example: "300"
+        type: string
+        x-nullable: false
+    required:
+    - name
+    - value
+    type: object
+    x-nullable: false
+  acs_task:
+    description: An operation queued for a CPE
+    properties:
+      args:
+        description: The arguments the task was queued with
+        type: object
+      attempts:
+        format: int32
+        type: integer
+        x-nullable: false
+      cpe_key:
+        type: string
+        x-nullable: false
+      created:
+        format: date-time
+        type: string
+        x-nullable: false
+      deadline:
+        description: When a task not yet run expires; absent if never
+        format: date-time
+        type: string
+        x-nullable: true
+      fault_code:
+        description: CWMP fault code of the last fault; 0 for a requeue after a dropped
+          session
+        format: int32
+        type: integer
+      fault_string:
+        type: string
+      id:
+        type: string
+        x-nullable: false
+      imsi:
+        type: string
+      max_attempts:
+        format: int32
+        type: integer
+        x-nullable: false
+      result:
+        description: What the CPE answered (values, names) and faults the task tolerated
+        type: object
+      status:
+        enum:
+        - pending
+        - in_progress
+        - done
+        - failed
+        - expired
+        type: string
+        x-nullable: false
+      type:
+        enum:
+        - reboot
+        - factory_reset
+        - refresh
+        - get_parameter_values
+        - set_parameter_values
+        - get_parameter_names
+        type: string
+        x-nullable: false
+      updated:
+        format: date-time
+        type: string
+        x-nullable: false
+    required:
+    - id
+    - cpe_key
+    - type
+    - status
+    - attempts
+    - max_attempts
+    - created
+    - updated
+    type: object
+    x-nullable: false
+  acs_task_request:
+    description: An operation to run on a CPE in its next session
+    properties:
+      max_attempts:
+        description: Sessions the task may be tried in; acsd's default when 0
+        format: int32
+        minimum: 0
+        type: integer
+      next_level:
+        description: List only the direct children of parameter_path
+        type: boolean
+      parameter_names:
+        description: Parameters or partial paths to read (get_parameter_values)
+        items:
+          type: string
+        type: array
+      parameter_path:
+        description: Path to list (get_parameter_names)
+        type: string
+      parameter_values:
+        description: Values to set (set_parameter_values)
+        items:
+          $ref: '#/definitions/acs_parameter_value'
+        type: array
+      ttl_sec:
+        description: |
+          Seconds after which a task not yet run expires; acsd's default when 0, never when negative
+        format: int64
+        type: integer
+      type:
+        enum:
+        - reboot
+        - factory_reset
+        - refresh
+        - get_parameter_values
+        - set_parameter_values
+        - get_parameter_names
+        type: string
+        x-nullable: false
+    required:
+    - type
     type: object
   aggregated_maximum_bitrate:
     properties:
