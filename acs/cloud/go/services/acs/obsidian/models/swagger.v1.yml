@@ -238,6 +238,7 @@ definitions:
         type: string
       last_inform:
         description: When the CPE last sent an Inform; absent if never
+        x-nullable: true
         type: string
         format: date-time
       informs_total:
@@ -279,9 +280,11 @@ definitions:
       reason:
         type: string
       started:
+        x-nullable: true
         type: string
         format: date-time
       ended:
+        x-nullable: true
         type: string
         format: date-time
       tasks_done:
@@ -461,6 +464,7 @@ definitions:
         format: date-time
       deadline:
         description: When a task not yet run expires; absent if never
+        x-nullable: true
         type: string
         format: date-time
       imsi:

@@ -6698,6 +6698,7 @@ definitions:
         description: When the CPE last sent an Inform; absent if never
         format: date-time
         type: string
+        x-nullable: true
       last_session:
         $ref: '#/definitions/acs_cpe_session'
       mode:
@@ -6760,6 +6761,7 @@ definitions:
       ended:
         format: date-time
         type: string
+        x-nullable: true
       faults:
         format: int32
         type: integer
@@ -6773,6 +6775,7 @@ definitions:
       started:
         format: date-time
         type: string
+        x-nullable: true
       tasks_done:
         format: int32
         type: integer
@@ -6838,6 +6841,7 @@ definitions:
         description: When a task not yet run expires; absent if never
         format: date-time
         type: string
+        x-nullable: true
       fault_code:
         description: CWMP fault code of the last fault; 0 for a requeue after a dropped
           session
