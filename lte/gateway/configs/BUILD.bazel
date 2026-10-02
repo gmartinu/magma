@@ -39,6 +39,7 @@ pkg_mklink(
 pkg_files(
     name = "lte_configs",
     srcs = [
+        ":acsd.yml",
         ":control_proxy.yml",
         ":ctraced.yml",
         ":directoryd.yml",

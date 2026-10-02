@@ -56,6 +56,7 @@ jobs:
           # Configure which scopes are allowed.
           scopes: |
             aaa_server
+            acsd
             agw
             amf
             ci

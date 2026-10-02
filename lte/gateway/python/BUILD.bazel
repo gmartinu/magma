@@ -13,6 +13,7 @@ load("@rules_pkg//pkg:mappings.bzl", "pkg_filegroup")
 load("//bazel:runfiles.bzl", "expand_runfiles")
 
 LTE_PY_SERVICES = [
+    "acsd",
     "enodebd",
     "health",
     "kernsnoopd",

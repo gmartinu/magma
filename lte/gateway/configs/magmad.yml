@@ -39,6 +39,7 @@ magma_services:
   - redirectd
   - sctpd
   - monitord
+  - acsd
   - connectiond
 #  - kernsnoopd
 # - liagentd
@@ -56,6 +57,7 @@ registered_dynamic_services:
   - td-agent-bit
   - monitord
   - dpid
+  - acsd
 
 # A list of group of services which are linked together in systemd
 linked_services:
