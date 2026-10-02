@@ -1,0 +1,409 @@
+"""
+Copyright 2026 The Magma Authors.
+
+This source code is licensed under the BSD-style license found in the
+LICENSE file in the root directory of this source tree.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
+import threading
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+
+from magma.common.redis.containers import RedisHashDict
+from magma.common.redis.serializers import (
+    get_json_deserializer,
+    get_json_serializer,
+)
+
+SESSION_TIMEOUT_SEC = 120
+TASK_MAX_ATTEMPTS = 3
+TASK_TTL_SEC = 7 * 24 * 3600
+INFORM_WINDOW_SEC = 3600
+# Done, failed and expired tasks kept per CPE so their outcome can be read.
+FINISHED_TASKS_KEPT = 20
+
+TASK_PENDING = 'pending'
+TASK_IN_PROGRESS = 'in_progress'
+TASK_DONE = 'done'
+TASK_FAILED = 'failed'
+TASK_EXPIRED = 'expired'
+FINISHED = (TASK_DONE, TASK_FAILED, TASK_EXPIRED)
+
+
+class TaskNotFound(KeyError):
+    pass
+
+
+@dataclass
+class Task:
+    """An operation queued for a CPE, run in its next session."""
+    task_id: str
+    imsi: str
+    type: str
+    args: Dict[str, Any] = field(default_factory=dict)
+    status: str = TASK_PENDING
+    attempts: int = 0
+    max_attempts: int = TASK_MAX_ATTEMPTS
+    # The session running the task, or the one whose retryable fault
+    # requeued it (so that session does not pick it up again).
+    session_id: str = ''
+    fault_code: int = 0
+    fault_string: str = ''
+    result: Dict[str, Any] = field(default_factory=dict)
+    created: float = 0.0
+    updated: float = 0.0
+    # 0 means no deadline.
+    deadline: float = 0.0
+
+
+@dataclass
+class Session:
+    """
+    An open CWMP session, keyed by the CPE's source IP since acsd tells CPEs
+    apart by address (no cookies).
+    """
+    session_id: str
+    imsi: str
+    source_ip: str
+    # Data model root from the Inform: 'Device.' or 'InternetGatewayDevice.'.
+    root: str = 'Device.'
+    pending_task_id: str = ''
+    pending_method: str = ''
+    task_step: int = 0
+    created: float = 0.0
+    expires: float = 0.0
+
+
+@dataclass
+class ParameterSnapshot:
+    imsi: str
+    values: Dict[str, str] = field(default_factory=dict)
+    updated: float = 0.0
+
+
+@dataclass
+class InformCount:
+    # Informs in the current fixed window, and when that window ends.
+    count: int
+    window_end: float
+    total: int
+    last_inform: float
+
+
+@dataclass
+class ReapResult:
+    sessions: int = 0
+    requeued_tasks: int = 0
+    expired_tasks: int = 0
+
+
+class AcsStore:
+    """
+    acsd state in Redis: open sessions, the per-IMSI task queue, the last
+    parameter snapshot and inform counters. Task semantics follow the Go
+    ACSStorage of the cloud ACS (claim, retry, fail, timeout).
+
+    acsd is the only writer of these keys, so compound updates are made
+    atomic with a process lock rather than Redis transactions; every single
+    write still lands in Redis, so a restarted acsd picks up where it was.
+    """
+
+    def __init__(
+        self,
+        client,
+        prefix: str = 'acsd',
+        clock: Callable[[], float] = time.time,
+        session_timeout_sec: float = SESSION_TIMEOUT_SEC,
+    ):
+        self._clock = clock
+        self._lock = threading.RLock()
+        self.session_timeout_sec = session_timeout_sec
+
+        def hash_dict(name):
+            return RedisHashDict(
+                client, '%s:%s' % (prefix, name),
+                get_json_serializer(), get_json_deserializer(),
+            )
+        self._sessions = hash_dict('sessions')
+        self._tasks = hash_dict('tasks')
+        # IMSI -> task IDs in creation order, which is the run order.
+        self._queues = hash_dict('queues')
+        self._params = hash_dict('params')
+        self._informs = hash_dict('informs')
+
+    # Sessions
+
+    def put_session(self, session: Session) -> None:
+        """Store a session, pushing its expiry one timeout from now."""
+        session.expires = self._clock() + self.session_timeout_sec
+        self._sessions[session.source_ip] = asdict(session)
+
+    def get_session(self, source_ip: str) -> Optional[Session]:
+        """The unexpired session open from source_ip, or None."""
+        raw = self._sessions.get(source_ip)
+        if raw is None:
+            return None
+        session = Session(**raw)
+        if session.expires <= self._clock():
+            return None
+        return session
+
+    def list_sessions(self) -> List[Session]:
+        return [Session(**raw) for raw in self._sessions.values()]
+
+    def end_session(self, source_ip: str, reason: str) -> int:
+        """
+        Close the session from source_ip and requeue the task it was
+        running. Returns the number of tasks requeued or failed.
+        """
+        with self._lock:
+            raw = self._sessions.pop(source_ip, None)
+            if raw is None:
+                return 0
+            return self._release_tasks(raw['imsi'], {raw['session_id']}, reason)
+
+    def end_imsi_sessions(self, imsi: str, reason: str) -> int:
+        """Close every session of a CPE, e.g. when it starts a new one."""
+        with self._lock:
+            ips = [s.source_ip for s in self.list_sessions() if s.imsi == imsi]
+            return sum(self.end_session(ip, reason) for ip in ips)
+
+    def end_all_sessions(self, reason: str) -> int:
+        """Close every session; acsd does this on start, since a restarted
+        process cannot continue the HTTP exchanges of the previous one."""
+        with self._lock:
+            ips = [s.source_ip for s in self.list_sessions()]
+            ended = sum(self.end_session(ip, reason) for ip in ips)
+            return ended + self._release_orphans(reason)
+
+    def reap_expired(self) -> ReapResult:
+        """
+        End expired sessions, requeue tasks left in progress by a session
+        that no longer exists and expire pending tasks past their deadline.
+        """
+        with self._lock:
+            res = ReapResult()
+            now = self._clock()
+            for session in self.list_sessions():
+                if session.expires <= now:
+                    self._sessions.pop(session.source_ip, None)
+                    res.sessions += 1
+            res.requeued_tasks = self._release_orphans('session timed out')
+            for task in self._all_tasks():
+                if task.status == TASK_PENDING and _past(task.deadline, now):
+                    task.status, task.updated = TASK_EXPIRED, now
+                    self._save(task)
+                    res.expired_tasks += 1
+            return res
+
+    # Tasks
+
+    def create_task(
+        self,
+        imsi: str,
+        task_type: str,
+        args: Optional[Dict[str, Any]] = None,
+        max_attempts: int = TASK_MAX_ATTEMPTS,
+        ttl_sec: float = TASK_TTL_SEC,
+    ) -> Task:
+        """Queue a task behind the other tasks of the CPE. ttl_sec <= 0
+        means the task never expires."""
+        with self._lock:
+            now = self._clock()
+            task = Task(
+                task_id=uuid.uuid4().hex,
+                imsi=imsi,
+                type=task_type,
+                args=dict(args or {}),
+                max_attempts=max(1, max_attempts),
+                created=now,
+                updated=now,
+                deadline=now + ttl_sec if ttl_sec > 0 else 0.0,
+            )
+            self._save(task)
+            queue = self._queues.get(imsi, [])
+            queue.append(task.task_id)
+            self._queues[imsi] = self._prune(queue)
+            return task
+
+    def get_task(self, task_id: str) -> Optional[Task]:
+        raw = self._tasks.get(task_id)
+        return Task(**raw) if raw is not None else None
+
+    def list_tasks(self, imsi: str) -> List[Task]:
+        """The tasks of a CPE in run order."""
+        tasks = (self.get_task(t) for t in self._queues.get(imsi, []))
+        return [t for t in tasks if t is not None]
+
+    def pending_count(self, imsi: str) -> int:
+        return sum(
+            t.status in (TASK_PENDING, TASK_IN_PROGRESS)
+            for t in self.list_tasks(imsi)
+        )
+
+    def claim_next_task(self, imsi: str, session_id: str) -> Optional[Task]:
+        """
+        Mark the oldest runnable task of the CPE in progress in the session
+        and return it, or None. A task requeued by a fault in this session
+        is left for the next one.
+        """
+        with self._lock:
+            now = self._clock()
+            for task in self.list_tasks(imsi):
+                if task.status != TASK_PENDING or task.session_id == session_id:
+                    continue
+                if _past(task.deadline, now):
+                    continue
+                task.status, task.session_id = TASK_IN_PROGRESS, session_id
+                task.attempts += 1
+                task.updated = now
+                self._save(task)
+                return task
+            return None
+
+    def save_task_result(self, task_id: str, result: Dict[str, Any]) -> None:
+        """Keep the partial result of a task that takes several RPCs."""
+        with self._lock:
+            task = self._must_get(task_id)
+            task.result, task.updated = result, self._clock()
+            self._save(task)
+
+    def complete_task(self, task_id: str, result: Dict[str, Any]) -> Task:
+        with self._lock:
+            task = self._must_get(task_id)
+            task.status, task.result, task.session_id = TASK_DONE, result, ''
+            task.fault_code, task.fault_string = 0, ''
+            task.updated = self._clock()
+            self._save(task)
+            return task
+
+    def fail_task(
+        self,
+        task_id: str,
+        fault_code: int,
+        fault_string: str,
+        retryable: bool,
+    ) -> Task:
+        """
+        Record a fault. A retryable fault requeues the task while it has
+        attempts left and is before its deadline; otherwise it fails.
+        """
+        with self._lock:
+            task = self._must_get(task_id)
+            now = self._clock()
+            if (
+                retryable and task.attempts < task.max_attempts
+                and not _past(task.deadline, now)
+            ):
+                # The session ID stays so this session does not retry it.
+                task.status = TASK_PENDING
+            else:
+                task.status, task.session_id = TASK_FAILED, ''
+            task.fault_code, task.fault_string = fault_code, fault_string
+            task.updated = now
+            self._save(task)
+            return task
+
+    # Parameters and informs
+
+    def merge_parameters(
+        self, imsi: str, values: Dict[str, str],
+    ) -> ParameterSnapshot:
+        """Merge values the CPE reported onto its last snapshot."""
+        with self._lock:
+            snapshot = self.get_parameters(imsi)
+            snapshot.values.update(values)
+            snapshot.updated = self._clock()
+            self._params[imsi] = asdict(snapshot)
+            return snapshot
+
+    def get_parameters(self, imsi: str) -> ParameterSnapshot:
+        raw = self._params.get(imsi)
+        return ParameterSnapshot(**raw) if raw else ParameterSnapshot(imsi)
+
+    def count_inform(
+        self, imsi: str, window_sec: float = INFORM_WINDOW_SEC,
+    ) -> InformCount:
+        """Count an Inform in fixed windows of window_sec."""
+        with self._lock:
+            now = self._clock()
+            raw = self._informs.get(imsi)
+            counts = InformCount(**raw) if raw else InformCount(0, 0.0, 0, 0.0)
+            if counts.window_end <= now:
+                counts.count, counts.window_end = 0, now + window_sec
+            counts.count += 1
+            counts.total += 1
+            counts.last_inform = now
+            self._informs[imsi] = asdict(counts)
+            return counts
+
+    def get_inform_count(self, imsi: str) -> Optional[InformCount]:
+        raw = self._informs.get(imsi)
+        return InformCount(**raw) if raw else None
+
+    # Internals
+
+    def _save(self, task: Task) -> None:
+        self._tasks[task.task_id] = asdict(task)
+
+    def _must_get(self, task_id: str) -> Task:
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFound(task_id)
+        return task
+
+    def _all_tasks(self) -> List[Task]:
+        return [Task(**raw) for raw in self._tasks.values()]
+
+    def _release_tasks(self, imsi: str, session_ids, reason: str) -> int:
+        """Treat tasks left in progress by the sessions as a retryable
+        fault, as the Go storage does for orphaned tasks."""
+        released = 0
+        for task in self.list_tasks(imsi):
+            if task.status == TASK_IN_PROGRESS and task.session_id in session_ids:
+                self._requeue_orphan(task, reason)
+                released += 1
+        return released
+
+    def _release_orphans(self, reason: str) -> int:
+        live = {s.session_id for s in self.list_sessions()}
+        released = 0
+        for task in self._all_tasks():
+            if task.status == TASK_IN_PROGRESS and task.session_id not in live:
+                self._requeue_orphan(task, reason)
+                released += 1
+        return released
+
+    def _requeue_orphan(self, task: Task, reason: str) -> None:
+        now = self._clock()
+        if task.attempts < task.max_attempts and not _past(task.deadline, now):
+            task.status = TASK_PENDING
+        else:
+            task.status = TASK_FAILED
+        task.session_id, task.fault_code, task.fault_string = '', 0, reason
+        task.updated = now
+        self._save(task)
+
+    def _prune(self, queue: List[str]) -> List[str]:
+        """Drop the oldest finished tasks beyond FINISHED_TASKS_KEPT."""
+        finished = [
+            tid for tid in queue
+            if (self.get_task(tid) or Task('', '', '', status=TASK_DONE)).status
+            in FINISHED
+        ]
+        drop = set(finished[:max(0, len(finished) - FINISHED_TASKS_KEPT)])
+        for tid in drop:
+            self._tasks.pop(tid, None)
+        return [tid for tid in queue if tid not in drop]
+
+
+def _past(deadline: float, now: float) -> bool:
+    return deadline > 0 and deadline <= now
