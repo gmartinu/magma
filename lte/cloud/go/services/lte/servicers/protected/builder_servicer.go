@@ -237,6 +237,7 @@ func (s *builderServicer) Build(ctx context.Context, request *builder_protos.Bui
 			LogLevel: protos.LogLevel_INFO,
 		},
 	}
+	vals["acsd"] = getAcsdMconfig(ctx, &network)
 
 	ret.ConfigsByKey, err = mconfig.MarshalConfigs(vals)
 	if err != nil {

@@ -434,3 +434,32 @@ pytest_test(
         requirement("pyyaml"),
     ],
 )
+
+pytest_test(
+    name = "test_frozen_mode",
+    size = "small",
+    srcs = ["test_frozen_mode.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:claimed",
+        "//lte/gateway/python/magma/acsd:claims",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:digest",
+        "//lte/gateway/python/magma/acsd:rpc_servicer",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/tr069:models",
+        "//lte/protos:cpe_acs_python_grpc",
+        "//lte/protos:cpe_acs_python_proto",
+        "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
+        requirement("grpcio"),
+    ],
+)

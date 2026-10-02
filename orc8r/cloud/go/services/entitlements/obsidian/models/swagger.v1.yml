@@ -1,0 +1,217 @@
+---
+swagger: '2.0'
+
+magma-gen-meta:
+  go-package: magma/orc8r/cloud/go/services/entitlements/obsidian/models
+  dependencies:
+    - 'orc8r/cloud/go/models/swagger-common.yml'
+  temp-gen-filename: orc8r-entitlements-swagger.yml
+  output-dir: orc8r/cloud/go/services/entitlements/obsidian
+
+info:
+  title: Entitlements Model Definitions and Paths
+  description: Magma REST APIs
+  version: 1.0.0
+
+tags:
+  - name: Entitlements
+    description: Which licensed features a tenant (NMS organization) may use
+
+basePath: /magma/v1
+
+paths:
+  /tenants/{tenant_id}/entitlements:
+    get:
+      summary: List the entitlements of a tenant
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/tenant_id'
+      responses:
+        '200':
+          description: Entitlements of the tenant, one per feature
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/entitlement'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    put:
+      summary: Replace all entitlements of a tenant
+      description: Features left out of the list are removed from the tenant.
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/tenant_id'
+        - in: body
+          name: entitlements
+          description: The tenant's entitlements, at most one per feature
+          required: true
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/entitlement'
+      responses:
+        '204':
+          description: Ok
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /tenants/{tenant_id}/entitlements/{feature}:
+    get:
+      summary: Get the entitlement of a tenant to one feature
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/tenant_id'
+        - $ref: '#/parameters/feature'
+      responses:
+        '200':
+          description: The entitlement
+          schema:
+            $ref: '#/definitions/entitlement'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    put:
+      summary: Create or update the entitlement of a tenant to one feature
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/tenant_id'
+        - $ref: '#/parameters/feature'
+        - in: body
+          name: entitlement
+          description: The entitlement; its feature must match the path
+          required: true
+          schema:
+            $ref: '#/definitions/entitlement'
+      responses:
+        '204':
+          description: Ok
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    delete:
+      summary: Remove the entitlement of a tenant to one feature
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/tenant_id'
+        - $ref: '#/parameters/feature'
+      responses:
+        '204':
+          description: Ok
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /networks/{network_id}/entitlements:
+    get:
+      summary: The entitlements that apply to a network, through its tenant
+      tags:
+        - Entitlements
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '200':
+          description: Entitlements of the network's tenant
+          schema:
+            $ref: '#/definitions/network_entitlements'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+parameters:
+  feature:
+    in: path
+    name: feature
+    description: Feature ID, e.g. acs
+    required: true
+    type: string
+    pattern: '^[a-z][a-z0-9_]{0,63}$'
+
+definitions:
+  entitlement:
+    description: >
+      Permission of one tenant to use one licensed feature. Past not_after
+      the feature keeps working for grace_days; after that it is frozen
+      (REST read-only, gateway services frozen), never removed.
+    type: object
+    required:
+      - feature
+      - enabled
+    properties:
+      feature:
+        description: Feature ID, e.g. acs
+        type: string
+        pattern: '^[a-z][a-z0-9_]{0,63}$'
+        x-nullable: false
+      enabled:
+        description: False switches the feature off for the tenant
+        type: boolean
+      not_after:
+        description: Expiry; omitted means no expiry
+        type: string
+        format: date-time
+        x-nullable: true
+      grace_days:
+        description: Days past not_after during which nothing changes
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 3650
+        default: 30
+      source:
+        description: Who set the entitlement
+        type: string
+        enum:
+          - manual
+          - license
+        default: manual
+      license_id:
+        description: The license artefact this entitlement came from
+        type: string
+        maxLength: 255
+      updated_at:
+        description: Last change, set by the server
+        type: string
+        format: date-time
+        readOnly: true
+      state:
+        $ref: '#/definitions/entitlement_state'
+
+  entitlement_state:
+    description: >
+      Effective state, computed by the server: active, grace (expired,
+      still working), frozen (expired past the grace period) or disabled
+      (switched off). Read-only.
+    type: string
+    readOnly: true
+    enum:
+      - active
+      - grace
+      - frozen
+      - disabled
+
+  network_entitlements:
+    type: object
+    required:
+      - network_id
+      - enforce
+      - entitlements
+    properties:
+      network_id:
+        type: string
+        x-nullable: false
+      tenant_id:
+        description: The tenant that owns the network; omitted when none does
+        type: integer
+        format: int64
+        x-nullable: true
+      enforce:
+        description: >
+          Whether this Orc8r enforces entitlements. When false every feature
+          behaves as entitled whatever the records say.
+        type: boolean
+        x-nullable: false
+      entitlements:
+        type: array
+        items:
+          $ref: '#/definitions/entitlement'

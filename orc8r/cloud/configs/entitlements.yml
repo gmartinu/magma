@@ -1,0 +1,8 @@
+---
+# Enforce per-tenant entitlements to licensed features (e.g. acs). When
+# false every feature counts as entitled. Helm sets it with
+# entitlements.enforce.
+enforce: false
+# While enforcing, let networks that no tenant lists use every feature
+# (deployments without an NMS). Off, such networks are not entitled.
+allowUntenanted: false

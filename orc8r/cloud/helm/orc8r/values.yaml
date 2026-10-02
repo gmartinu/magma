@@ -319,6 +319,19 @@ streamer:
     labels: {}
     annotations: {}
 
+entitlements:
+  # Enforce per-tenant entitlements to licensed features (e.g. acs). When
+  # false every feature counts as entitled, whatever the records say.
+  enforce: false
+  service:
+    labels:
+      orc8r.io/obsidian_handlers: "true"
+      orc8r.io/swagger_spec: "true"
+    annotations:
+      orc8r.io/obsidian_handlers_path_prefixes: >
+        /magma/v1/tenants/:tenant_id/entitlements,
+        /magma/v1/networks/:network_id/entitlements,
+
 tenants:
   service:
     labels:

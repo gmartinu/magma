@@ -474,6 +474,49 @@ paths:
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
+  /lte/{network_id}/acs:
+    get:
+      summary: Get the network's TR-069 ACS (acsd) config
+      tags:
+        - LTE Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '200':
+          description: ACS config of the network
+          schema:
+            $ref: '#/definitions/network_acs_configs'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    put:
+      summary: Set the network's TR-069 ACS (acsd) config
+      tags:
+        - LTE Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - name: config
+          in: body
+          description: ACS config of the network
+          required: true
+          schema:
+            $ref: '#/definitions/network_acs_configs'
+      responses:
+        '204':
+          description: Success
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    delete:
+      summary: Remove the network's ACS config; acsd falls back to its defaults
+      tags:
+        - LTE Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '204':
+          description: Success
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
   /lte/{network_id}/subscriber_config:
     get:
       summary: Get a network-wide subscriber config
@@ -1719,6 +1762,38 @@ definitions:
     description: Name of the federated network serving this LTE network. Blank for non federated
     type: string
     example: 'feg_id_only_for_federated_network'
+
+  network_acs_configs:
+    description: >
+      Network-wide config of acsd, the TR-069 ACS on the AGWs. An expired
+      acs entitlement forces mode frozen whatever is set here.
+    type: object
+    properties:
+      mode:
+        description: >
+          active serves CPEs; frozen answers their Informs but sends them
+          nothing (no tasks), so they keep their configuration.
+        type: string
+        enum:
+          - active
+          - frozen
+        default: active
+      periodic_inform_interval:
+        description: PeriodicInformInterval pushed to CPEs, in seconds; 0 leaves the CPE value
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 86400
+      port:
+        description: CWMP listener port on mtr0; 0 uses the port in acsd.yml
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 65535
+    example:
+      mode: active
+      periodic_inform_interval: 300
+      port: 0
 
   network_ran_configs:
     description: RAN (radio access network) cellular configuration for a network

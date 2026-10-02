@@ -13,4 +13,20 @@
 
 package servicers
 
+import (
+	"context"
+
+	"magma/orc8r/cloud/go/services/entitlements"
+)
+
 var GetStateMconfig = getStateMconfig
+
+var FilterLicensedServices = filterLicensedServices
+
+// StubFeatureDecision replaces the entitlements lookup until the returned
+// func runs.
+func StubFeatureDecision(f func(ctx context.Context, networkID, feature string) (entitlements.Decision, error)) func() {
+	saved := featureDecision
+	featureDecision = f
+	return func() { featureDecision = saved }
+}
