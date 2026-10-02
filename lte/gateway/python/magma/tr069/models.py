@@ -318,6 +318,17 @@ class RebootResponse(Tr069ComplexModel):
     _type_info["DummyField"] = UnsignedInteger
 
 
+class FactoryReset(Tr069ComplexModel):
+    _type_info = odict()
+
+
+class FactoryResetResponse(Tr069ComplexModel):
+    # Dummy field required because spyne does not allow 'bare' RPC function with
+    # no input parameters. This field is never sent by CPE.
+    _type_info = odict()
+    _type_info["DummyField"] = UnsignedInteger
+
+
 # ACS messages
 
 
