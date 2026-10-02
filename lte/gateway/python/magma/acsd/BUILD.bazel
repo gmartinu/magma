@@ -101,3 +101,10 @@ py_library(
         "//orc8r/gateway/python/magma/common:service_registry",
     ],
 )
+
+py_library(
+    name = "store",
+    srcs = ["store.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//orc8r/gateway/python/magma/common/redis:containers"],
+)
