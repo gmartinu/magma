@@ -46,6 +46,9 @@ py_library(
     deps = [
         ":acsd_identity",
         ":acsd_lib",
+        ":claimed",
+        ":claims",
+        ":credentials",
         ":digest",
         ":server",
         ":session",
@@ -71,6 +74,9 @@ py_library(
     srcs = ["session.py"],
     visibility = ["//visibility:public"],
     deps = [
+        ":acsd_lib",
+        ":claimed",
+        ":digest",
         ":store",
         ":tasks",
         "//lte/gateway/python/magma/acsd/datamodel",
@@ -131,5 +137,48 @@ py_library(
         "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/tr069:models",
         requirement("spyne"),
+    ],
+)
+
+py_library(
+    name = "claims",
+    srcs = ["claims.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//orc8r/gateway/python/magma/common/redis:containers"],
+)
+
+py_library(
+    name = "credentials",
+    srcs = ["credentials.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":digest",
+        "//orc8r/gateway/python/magma/common/redis:containers",
+    ],
+)
+
+py_library(
+    name = "claimed",
+    srcs = ["claimed.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":claims",
+        ":credentials",
+        ":digest",
+        ":store",
+        ":tasks",
+        "//lte/gateway/python/magma/acsd/datamodel",
+        requirement("spyne"),
+    ],
+)
+
+py_library(
+    name = "cli",
+    srcs = ["cli.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":claims",
+        ":credentials",
+        "//orc8r/gateway/python/magma/common/redis:client",
     ],
 )

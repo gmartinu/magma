@@ -87,6 +87,7 @@ setup(
         'scripts/subscriber_cli.py',
         'scripts/spgw_service_cli.py',
         'scripts/cpe_monitoring_cli.py',
+        'scripts/acsd_cli.py',
         'scripts/state_cli.py',
         'scripts/dp_probe_cli.py',
         'scripts/user_trace_cli.py',

@@ -241,3 +241,94 @@ pytest_test(
         requirement("fakeredis"),
     ],
 )
+
+pytest_test(
+    name = "test_claims",
+    size = "small",
+    srcs = ["test_claims.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:claims",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_credentials",
+    size = "small",
+    srcs = ["test_credentials.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:digest",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_claimed",
+    size = "small",
+    srcs = ["test_claimed.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:claimed",
+        "//lte/gateway/python/magma/acsd:claims",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:digest",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/acsd/datamodel",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_wan_listener",
+    size = "small",
+    srcs = ["test_wan_listener.py"],
+    data = glob(["fixtures/*.xml"]),
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:claimed",
+        "//lte/gateway/python/magma/acsd:claims",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:digest",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_cli",
+    size = "small",
+    srcs = ["test_cli.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:claims",
+        "//lte/gateway/python/magma/acsd:cli",
+        "//lte/gateway/python/magma/acsd:credentials",
+        requirement("fakeredis"),
+    ],
+)
