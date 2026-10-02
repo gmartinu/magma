@@ -14,6 +14,7 @@
 import HttpsProxyAgent, {HttpsProxyAgentOptions} from 'https-proxy-agent';
 import auditLoggingDecorator from './auditLoggingDecorator';
 import proxy from 'express-http-proxy';
+import requireEntitlement from '../middleware/entitlementMiddleware';
 import url from 'url';
 import {API_HOST, apiCredentials} from '../../config/config';
 import {AxiosError} from 'axios';
@@ -204,6 +205,24 @@ router.use(
   proxy(API_HOST, {
     ...PROXY_OPTIONS,
     filter: apiFilter,
+    proxyErrorHandler,
+  }),
+);
+
+// TR-069 ACS (licensed): network access first, so the entitlement lookup
+// only runs for networks the user may see, then the tenant's entitlement.
+router.use(
+  '/magma/v1/acs/:networkID',
+  (req: Request, res: Response, next: NextFunction) => {
+    apiFilter(req)
+      .then(allowed => (allowed ? next() : res.status(404).send('Not Found')))
+      .catch(next);
+  },
+  requireEntitlement('acs'),
+  proxy(API_HOST, {
+    ...PROXY_OPTIONS,
+    filter: apiFilter,
+    userResDecorator: auditLoggingDecorator,
     proxyErrorHandler,
   }),
 );
