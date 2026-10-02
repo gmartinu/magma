@@ -1,0 +1,140 @@
+---
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Minimal acsd dev environment: redis + mobilityd + acsd from the prebuilt
+# AGW python image, with this checkout bind-mounted over /magma so code
+# changes need a restart, not an image rebuild. See README.md.
+name: acs-dev
+
+x-py: &py
+  image: ${AGW_PYTHON_IMAGE:-linuxfoundation.jfrog.io/magma-docker/agw_gateway_python_arm:1.8.0}
+  environment:
+    MAGMA_DEV_MODE: "1"
+    PYTHONPATH: /opt/acs-dev-deps
+  volumes:
+    - ../../../..:/magma:ro
+    - ../../configs:/etc/magma:ro
+    - ../../../../orc8r/gateway/configs/templates:/etc/magma/templates:ro
+    - ./configs:/var/opt/magma/configs:ro
+    - ./.gen:/build/gen:ro
+    - ./.deps:/opt/acs-dev-deps:ro
+    - magma-tmp:/var/opt/magma/tmp
+    - acsd-certs:/var/opt/magma/certs:ro
+  cpus: 1
+  mem_limit: 512m
+  restart: "no"
+
+services:
+  protogen:
+    <<: *py
+    network_mode: none
+    volumes:
+      - ../../../..:/magma:ro
+      - ./.gen:/out
+    entrypoint: ["/magma/lte/gateway/docker/acs-dev/gen_protos.sh"]
+
+  # One-shot: a self-signed cert for acsd's claimed (WAN) listener, made by
+  # `acsd_cli.py dev-cert` into the acsd-certs volume (skipped once there).
+  # DEV ONLY: CPEs only accept it with verification off or this cert pinned.
+  wancert:
+    <<: *py
+    network_mode: none
+    volumes:
+      - ../../../..:/magma:ro
+      - acsd-certs:/certs
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        test -s /certs/acsd_wan.crt ||
+        python3 /magma/lte/gateway/python/scripts/acsd_cli.py dev-cert
+        --out-dir /certs --cn 127.0.0.1
+
+  # One-shot: pip-installs requirements.txt into ./.deps (skipped once done).
+  pydeps:
+    <<: *py
+    networks: [acsnet]
+    volumes:
+      - ./requirements.txt:/requirements.txt:ro
+      - ./.deps:/deps
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        cmp -s /requirements.txt /deps/.installed ||
+        { pip3 install -q --no-warn-conflicts --target /deps -r /requirements.txt &&
+        cp /requirements.txt /deps/.installed; }
+
+  redis:
+    <<: *py
+    # Owns the network namespace that mobilityd, acsd and cpe-sim join, so
+    # the stock service_registry.yml (all 127.0.0.1) works unchanged.
+    networks: [acsnet]
+    ports:
+      - "127.0.0.1:48081:48081"   # CWMP core listener (acsd)
+      - "127.0.0.1:48443:48443"   # CWMP claimed listener, HTTPS (acsd)
+    cpus: 0.5
+    mem_limit: 256m
+    depends_on:
+      protogen:
+        condition: service_completed_successfully
+      pydeps:
+        condition: service_completed_successfully
+      wancert:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 4s
+      retries: 5
+    command: >
+      /bin/bash -c "/usr/local/bin/generate_service_config.py --service=redis --template=redis &&
+             exec /usr/bin/redis-server /var/opt/magma/tmp/redis.conf --daemonize no"
+
+  mobilityd:
+    <<: *py
+    network_mode: service:redis
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "60051"]
+      interval: 4s
+      retries: 10
+    command: python3 -m magma.mobilityd.main
+
+  acsd:
+    <<: *py
+    network_mode: service:redis
+    depends_on:
+      mobilityd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50086"]
+      interval: 4s
+      retries: 10
+    command: python3 -m magma.acsd.main
+
+  # Simulated CPE, run on demand: `docker compose run --rm cpe-sim <ip>`.
+  # NET_ADMIN lets it put the mobilityd-allocated UE IP on lo and send the
+  # Inform from it, so acsd sees that IP as the peer address.
+  cpe-sim:
+    <<: *py
+    profiles: [test]
+    network_mode: service:redis
+    cap_add: [NET_ADMIN]
+    depends_on: []
+    entrypoint: ["python3", "/magma/lte/gateway/docker/acs-dev/smoke_test.py"]
+
+networks:
+  acsnet:
+
+volumes:
+  magma-tmp:
+  acsd-certs:

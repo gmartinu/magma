@@ -1,0 +1,30 @@
+{
+  "configs_by_key": {
+    "acsd": {
+      "@type": "type.googleapis.com/magma.mconfig.AcsD",
+      "logLevel": "INFO",
+      "mode": "ACTIVE",
+      "port": 48081,
+      "periodicInformInterval": 0
+    },
+    "mobilityd": {
+      "@type": "type.googleapis.com/magma.mconfig.MobilityD",
+      "ipBlock": "192.168.128.0/24",
+      "ip_allocator_type": "IP_POOL",
+      "ipv6Block": "fdee:5:6c::/48",
+      "ipv6PrefixAllocationType": "RANDOM",
+      "logLevel": "INFO",
+      "multi_apn_ip_alloc": false,
+      "static_ip_enabled": false
+    },
+    "magmad": {
+      "@type": "type.googleapis.com/magma.mconfig.MagmaD",
+      "checkinInterval": 60,
+      "checkinTimeout": 10,
+      "autoupgradeEnabled": false,
+      "autoupgradePollInterval": 300,
+      "package_version": "0.0.0-0",
+      "logLevel": "INFO"
+    }
+  }
+}
