@@ -68,7 +68,8 @@ class Task:
 class Session:
     """
     An open CWMP session, keyed by the CPE's source IP since acsd tells CPEs
-    apart by address (no cookies).
+    apart by address (no cookies). session_key overrides that key for
+    claimed CPEs, which may share a NAT address.
     """
     session_id: str
     cpe_key: str
@@ -82,6 +83,13 @@ class Session:
     task_step: int = 0
     created: float = 0.0
     expires: float = 0.0
+    session_key: str = ''
+    # Identity mode of the listener the session runs on (config.MODE_*).
+    mode: str = 'core'
+
+    @property
+    def key(self) -> str:
+        return self.session_key or self.source_ip
 
 
 @dataclass
@@ -162,11 +170,11 @@ class AcsStore:
     def put_session(self, session: Session) -> None:
         """Store a session, pushing its expiry one timeout from now."""
         session.expires = self._clock() + self.session_timeout_sec
-        self._sessions[session.source_ip] = asdict(session)
+        self._sessions[session.key] = asdict(session)
 
-    def get_session(self, source_ip: str) -> Optional[Session]:
-        """The unexpired session open from source_ip, or None."""
-        raw = self._sessions.get(source_ip)
+    def get_session(self, key: str) -> Optional[Session]:
+        """The unexpired session under `key` (its source IP), or None."""
+        raw = self._sessions.get(key)
         if raw is None:
             return None
         session = Session(**raw)
@@ -177,13 +185,13 @@ class AcsStore:
     def list_sessions(self) -> List[Session]:
         return [Session(**raw) for raw in self._sessions.values()]
 
-    def end_session(self, source_ip: str, reason: str) -> int:
+    def end_session(self, key: str, reason: str) -> int:
         """
-        Close the session from source_ip and requeue the task it was
-        running. Returns the number of tasks requeued or failed.
+        Close the session under `key` and requeue the task it was running.
+        Returns the number of tasks requeued or failed.
         """
         with self._lock:
-            raw = self._sessions.pop(source_ip, None)
+            raw = self._sessions.pop(key, None)
             if raw is None:
                 return 0
             return self._release_tasks(raw['cpe_key'], {raw['session_id']}, reason)
@@ -191,15 +199,15 @@ class AcsStore:
     def end_cpe_sessions(self, cpe_key: str, reason: str) -> int:
         """Close every session of a CPE, e.g. when it starts a new one."""
         with self._lock:
-            ips = [s.source_ip for s in self.list_sessions() if s.cpe_key == cpe_key]
-            return sum(self.end_session(ip, reason) for ip in ips)
+            keys = [s.key for s in self.list_sessions() if s.cpe_key == cpe_key]
+            return sum(self.end_session(k, reason) for k in keys)
 
     def end_all_sessions(self, reason: str) -> int:
         """Close every session; acsd does this on start, since a restarted
         process cannot continue the HTTP exchanges of the previous one."""
         with self._lock:
-            ips = [s.source_ip for s in self.list_sessions()]
-            ended = sum(self.end_session(ip, reason) for ip in ips)
+            keys = [s.key for s in self.list_sessions()]
+            ended = sum(self.end_session(k, reason) for k in keys)
             return ended + self._release_orphans(reason)
 
     def reap_expired(self) -> ReapResult:
@@ -212,7 +220,7 @@ class AcsStore:
             now = self._clock()
             for session in self.list_sessions():
                 if session.expires <= now:
-                    self._sessions.pop(session.source_ip, None)
+                    self._sessions.pop(session.key, None)
                     res.sessions += 1
             res.requeued_tasks = self._release_orphans('session timed out')
             for task in self._all_tasks():

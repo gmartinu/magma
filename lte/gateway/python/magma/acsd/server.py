@@ -163,6 +163,8 @@ class CwmpRequestHandler(tr069_WSGIRequestHandler):
     def get_environ(self):
         environ = super().get_environ()
         environ[CONNECTION_STATE] = self.connection_state
+        # wsgiref leaves it out; claimed sessions are keyed by connection.
+        environ['REMOTE_PORT'] = str(self.client_address[1])
         return environ
 
 

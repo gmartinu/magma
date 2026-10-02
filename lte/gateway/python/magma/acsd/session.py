@@ -19,6 +19,8 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from magma.acsd import tasks
+from magma.acsd.claimed import ROTATE_CREDENTIALS
+from magma.acsd.config import LISTENER_MODE, MODE_CLAIMED, MODE_CORE
 from magma.acsd.datamodel import (
     DEFAULT_REGISTRY,
     ROOT_TR181,
@@ -31,6 +33,7 @@ from magma.acsd.datamodel import (
     device_info,
     fill_identity,
 )
+from magma.acsd.digest import DIGEST_USERNAME
 from magma.acsd.store import TASK_IN_PROGRESS, AcsStore, Session, Task
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
@@ -54,6 +57,19 @@ def source_ip_of(ctx: WsgiMethodContext) -> str:
     return ctx.transport.req_env.get('REMOTE_ADDR', '')
 
 
+def session_key_of(env: dict) -> str:
+    """
+    Core sessions are keyed by source IP: mtr0 addresses are unique per UE.
+    Claimed CPEs may share a carrier NAT address, so their session is the
+    TCP connection; a CPE that reconnects mid-session has its task retried
+    in the next session.
+    """
+    source_ip = env.get('REMOTE_ADDR', '')
+    if env.get(LISTENER_MODE, MODE_CORE) != MODE_CLAIMED:
+        return source_ip
+    return 'claimed/%s/%s' % (source_ip, env.get('REMOTE_PORT', ''))
+
+
 class CwmpSessionHandler:
     """
     CWMP session flow for acsd: answer the Inform, then, from the CPE's
@@ -61,9 +77,10 @@ class CwmpSessionHandler:
     exchange, record each answer or Fault on the task, and end the session
     (204) once the queue is empty.
 
-    Session state lives in the store, keyed by source IP; that is sound
-    because the identity is derived from the source IP, so a later message
-    from the same IP belongs to the same CPE. Keeping it next to the task
+    Session state lives in the store, keyed by source IP on the core
+    listener; that is sound because the identity is derived from the source
+    IP, so a later message from the same IP belongs to the same CPE. On the
+    claimed listener it is keyed by TCP connection (session_key_of). Keeping it next to the task
     claims means a session that times out, or dies with acsd, requeues its
     task. Thread-safe, so the listener's worker threads can share one
     instance.
@@ -76,8 +93,14 @@ class CwmpSessionHandler:
         store: AcsStore,
         registry: Registry = DEFAULT_REGISTRY,
         clock: Callable[[], float] = time.monotonic,
+        claimed=None,
     ):
+        """
+        `claimed` (a claimed.ClaimedMode) serves the requests of a claimed
+        listener; without it they are refused.
+        """
         self._identify = identify
+        self._claimed = claimed
         self._store = store
         self._registry = registry
         self._clock = clock
@@ -88,9 +111,9 @@ class CwmpSessionHandler:
     def store(self) -> AcsStore:
         return self._store
 
-    def session_identity(self, source_ip: str) -> Optional[str]:
-        """The identity of the session open from source_ip, if any."""
-        session = self._store.get_session(source_ip)
+    def session_identity(self, key: str) -> Optional[str]:
+        """The identity of the session open under `key`, if any."""
+        session = self._store.get_session(key)
         return session.cpe_key if session else None
 
     def handle_tr069_message(
@@ -101,7 +124,7 @@ class CwmpSessionHandler:
         source_ip = source_ip_of(ctx)
         if isinstance(tr069_message, models.Inform):
             return self._handle_inform(ctx, source_ip, tr069_message)
-        session = self._store.get_session(source_ip)
+        session = self._store.get_session(session_key_of(ctx.transport.req_env))
         if session is None:
             if not isinstance(tr069_message, models.DummyInput):
                 logging.info(
@@ -125,9 +148,19 @@ class CwmpSessionHandler:
         inform: models.Inform,
     ) -> ComplexModelBase:
         serial = _serial_of(inform)
-        identity = self._identify(source_ip, inform)
+        env = ctx.transport.req_env
+        key = session_key_of(env)
+        mode = env.get(LISTENER_MODE, MODE_CORE)
+        username = env.get(DIGEST_USERNAME)
+        if mode == MODE_CLAIMED:
+            identity = (
+                self._claimed.identify(source_ip, inform, username)
+                if self._claimed else None
+            )
+        else:
+            identity = self._identify(source_ip, inform)
         if not identity:
-            self._store.end_session(source_ip, 'session refused')
+            self._store.end_session(key, 'session refused')
             logging.warning(
                 'Refusing CWMP session from %s (serial %s)', source_ip, serial,
             )
@@ -135,7 +168,7 @@ class CwmpSessionHandler:
             return models.DummyInput()
         self._maybe_reap()
         # A new Inform means the CPE gave up on any session it had open.
-        self._store.end_session(source_ip, 'CPE started a new session')
+        self._store.end_session(key, 'CPE started a new session')
         self._store.end_cpe_sessions(identity, 'CPE started a new session')
         values = _inform_values(inform)
         handler = self._registry.select(device_info(inform, values))
@@ -146,12 +179,16 @@ class CwmpSessionHandler:
             root=detect_root(values) or ROOT_TR181,
             model_handler=handler.name,
             created=time.time(),
+            session_key=key if key != source_ip else '',
+            mode=mode,
         )
         self._store.put_session(session)
         self._store.count_inform(identity)
         if values:
             self._store.merge_parameters(identity, values)
         self._update_model(session, device_id_identity(inform))
+        if mode == MODE_CLAIMED:
+            self._claimed.session_started(identity, username, handler)
         logging.info(
             'Inform from %s (serial %s, identity %s, handler %s, '
             '%d tasks pending)', source_ip, serial, identity, handler.name,
@@ -209,7 +246,7 @@ class CwmpSessionHandler:
         """Send the next request of the session, or end it."""
         request = self._next_request(session)
         if request is None:
-            self._store.end_session(session.source_ip, 'session ended')
+            self._store.end_session(session.key, 'session ended')
             logging.info('Session of %s done', session.cpe_key)
             return models.DummyInput()
         session.pending_method = type(request).__name__
@@ -234,6 +271,7 @@ class CwmpSessionHandler:
                 self._store.fail_task(
                     task.task_id, tasks.FAULT_INVALID_ARGUMENTS, str(err), False,
                 )
+                self._task_failed(session, task)
                 continue
             if not plan:
                 self._finish(session, task, {})
@@ -260,6 +298,8 @@ class CwmpSessionHandler:
         return task
 
     def _plan(self, task: Task, session: Session) -> List[ComplexModelBase]:
+        if session.mode == MODE_CLAIMED and task.type == ROTATE_CREDENTIALS:
+            return self._claimed.plan(task, session.root)
         return tasks.plan(task, session.root, self._handler(session))
 
     def _handler(self, session: Session) -> Handler:
@@ -271,6 +311,8 @@ class CwmpSessionHandler:
             self._update_model(session)
         self._store.complete_task(task.task_id, result)
         logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.cpe_key)
+        if session.mode == MODE_CLAIMED:
+            self._claimed.task_finished(task)
 
     def _fail(
         self, session: Session, task: Task, code: int, text: str, retry: bool,
@@ -281,6 +323,11 @@ class CwmpSessionHandler:
             'Task %s (%s) on %s fault %d: %s; now %s',
             task.task_id, task.type, session.cpe_key, code, text, failed.status,
         )
+        self._task_failed(session, task)
+
+    def _task_failed(self, session: Session, task: Task) -> None:
+        if session.mode == MODE_CLAIMED:
+            self._claimed.task_failed(task)
 
     def _update_model(
         self, session: Session, identity: Optional[Dict[str, str]] = None,
@@ -304,7 +351,10 @@ class CwmpSessionHandler:
             stored = self._store.get_model(session.cpe_key)
             identity = stored.model.get('identity', {}) if stored else {}
         fill_identity(model, identity)
-        _set_wan_address(model, session.source_ip)
+        if session.mode != MODE_CLAIMED:
+            # Behind a NAT the source IP is the carrier's, not the CPE's
+            # WAN address; the handler-reported one stands.
+            _set_wan_address(model, session.source_ip)
         self._store.put_model(session.cpe_key, handler.name, model.to_dict())
 
     @staticmethod

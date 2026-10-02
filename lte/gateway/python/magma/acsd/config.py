@@ -21,6 +21,13 @@ DEFAULT_CWMP_ADDRESS = '10.1.0.1'
 DEFAULT_CWMP_PORT = 48081
 DEFAULT_CWMP_WORKERS = 16
 
+# Identity modes of a CWMP listener: `core` names the CPE by the IMSI
+# behind its source IP on mtr0; `claimed` by its claim and per-CPE Digest.
+MODE_CORE = 'core'
+MODE_CLAIMED = 'claimed'
+# WSGI environ key with the mode of the listener a request came in on.
+LISTENER_MODE = 'acsd.listener_mode'
+
 AUTH_OFF = 'off'
 AUTH_REQUIRED = 'required'
 DEFAULT_AUTH_REALM = 'magma-acs'
