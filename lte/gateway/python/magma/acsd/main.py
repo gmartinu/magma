@@ -11,11 +11,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import _thread
 import logging
+import threading
 from typing import List
 
 from lte.protos.mconfig import mconfigs_pb2
-from magma.acsd.config import get_cwmp_bind
+from magma.acsd.config import CwmpBind, get_cwmp_bind, get_cwmp_workers
+from magma.acsd.server import make_cwmp_server
+from magma.acsd.session import CwmpSessionHandler
 from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
 from magma.configuration import load_service_config
@@ -23,9 +27,33 @@ from orc8r.protos.service303_pb2 import State
 
 
 def _get_operational_states() -> List[State]:
-    # No CPE sessions yet; `cpe_acs` state is reported once the CWMP
-    # listener lands.
+    # `cpe_acs` state is reported once acsd keeps per-CPE state (Stage 2).
     return []
+
+
+def start_cwmp_listener(
+    bind: CwmpBind,
+    handler: CwmpSessionHandler,
+    workers: int,
+) -> threading.Thread:
+    """
+    Serve CWMP on `bind` from a daemon thread. If the listener dies, the
+    main thread is interrupted so systemd restarts acsd instead of leaving
+    a healthy-looking service that no CPE can reach.
+    """
+    server = make_cwmp_server(bind, handler, workers)
+
+    def serve():
+        try:
+            server.serve_forever()
+        finally:
+            logging.error('CWMP listener stopped; interrupting acsd')
+            _thread.interrupt_main()
+
+    thread = threading.Thread(target=serve, name='cwmp-listener', daemon=True)
+    thread.server = server
+    thread.start()
+    return thread
 
 
 def main():
@@ -35,11 +63,15 @@ def main():
     # Optionally pipe errors to Sentry
     sentry_init(service_name=service.name, sentry_mconfig=service.shared_mconfig.sentry_config)
 
-    bind = get_cwmp_bind(load_service_config('acsd'), service.mconfig)
+    config = load_service_config('acsd')
+    bind = get_cwmp_bind(config, service.mconfig)
+    workers = get_cwmp_workers(config)
+    # identify defaults to accept-all until the mobilityd lookup is wired in.
+    start_cwmp_listener(bind, CwmpSessionHandler(), workers)
     logging.info(
-        'acsd started in mode %s; CWMP listener (%s %s:%d) not enabled yet',
+        'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',
         mconfigs_pb2.AcsD.Mode.Name(service.mconfig.mode),
-        bind.interface, bind.address, bind.port,
+        bind.interface, bind.address, bind.port, workers,
     )
 
     # Register a callback function for GetOperationalStates

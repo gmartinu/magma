@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable, List
 from wsgiref.simple_server import WSGIServer
 
-from magma.acsd.config import CwmpBind
+from magma.acsd.config import DEFAULT_CWMP_WORKERS, CwmpBind
 from magma.tr069.models import CWMP_NS
 from magma.tr069.rpc_methods import (
     RPC_RESPONSES,
@@ -28,8 +28,6 @@ from magma.tr069.rpc_methods import (
 from magma.tr069.server import tr069_WSGIRequestHandler
 from magma.tr069.spyne_mods import Tr069Application, Tr069Soap11
 from spyne.server.wsgi import WsgiApplication
-
-DEFAULT_WORKERS = 16
 
 WsgiApp = Callable[[dict, Callable], Iterable[bytes]]
 
@@ -147,7 +145,7 @@ class CwmpRequestHandler(tr069_WSGIRequestHandler):
 def make_cwmp_server(
     bind: CwmpBind,
     handler: Tr069MessageHandler,
-    workers: int = DEFAULT_WORKERS,
+    workers: int = DEFAULT_CWMP_WORKERS,
 ) -> PooledWSGIServer:
     """Create (but do not start) the CWMP listener on `bind`."""
     server = PooledWSGIServer(
