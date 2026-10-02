@@ -112,10 +112,17 @@ class CwmpSessionHandler:
         clock: Callable[[], float] = time.monotonic,
         claimed=None,
         observer: Optional[SessionObserver] = None,
+        frozen: bool = False,
     ):
         """
         `claimed` (a claimed.ClaimedMode) serves the requests of a claimed
         listener; without it they are refused.
+
+        `frozen` (AcsD.Mode FROZEN, an expired entitlement) still answers
+        every Inform and records what the CPE reports, but sends the CPE
+        nothing: no queued task runs and no credential rotation starts, so
+        the CPE keeps its last configuration. Tasks already queued stay
+        pending until their TTL.
         """
         self._identify = identify
         self._claimed = claimed
@@ -125,6 +132,11 @@ class CwmpSessionHandler:
         self._clock = clock
         self._reap_lock = threading.Lock()
         self._next_reap = 0.0
+        self._frozen = frozen
+
+    @property
+    def frozen(self) -> bool:
+        return self._frozen
 
     @property
     def store(self) -> AcsStore:
@@ -207,7 +219,7 @@ class CwmpSessionHandler:
         if values:
             self._store.merge_parameters(identity, values)
         self._update_model(session, device_id_identity(inform))
-        if mode == MODE_CLAIMED:
+        if mode == MODE_CLAIMED and not self._frozen:
             self._claimed.session_started(identity, username, handler)
         logging.info(
             'Inform from %s (serial %s, identity %s, handler %s, '
@@ -277,6 +289,8 @@ class CwmpSessionHandler:
         return request
 
     def _next_request(self, session: Session) -> Optional[ComplexModelBase]:
+        if self._frozen:
+            return None
         task = self._current_task(session)
         if task is not None:
             plan = self._plan(task, session)

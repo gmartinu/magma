@@ -40,6 +40,7 @@ CONNECTION_REQUEST_UNIMPLEMENTED = (
     'acsd does not send Connection Requests yet; queued tasks run at the '
     "CPE's next periodic Inform"
 )
+FROZEN = 'acsd is frozen (entitlement expired): it queues no tasks'
 
 
 class CpeManagerRpcServicer(CpeManagerServicer):
@@ -49,9 +50,11 @@ class CpeManagerRpcServicer(CpeManagerServicer):
     so a second AcsStore would race the handler.
     """
 
-    def __init__(self, store: AcsStore, views: CpeViews):
+    def __init__(self, store: AcsStore, views: CpeViews, frozen: bool = False):
         self._store = store
         self._views = views
+        # A frozen acsd (expired entitlement) queues nothing for its CPEs.
+        self._frozen = frozen
 
     def add_to_server(self, server) -> None:
         add_CpeManagerServicer_to_server(self, server)
@@ -59,6 +62,8 @@ class CpeManagerRpcServicer(CpeManagerServicer):
     def EnqueueTask(self, request: pb.EnqueueTaskRequest, context) -> pb.CpeTask:
         if not request.cpe_key:
             return _error(context, grpc.StatusCode.INVALID_ARGUMENT, 'cpe_key is required', pb.CpeTask())
+        if self._frozen:
+            return _error(context, grpc.StatusCode.FAILED_PRECONDITION, FROZEN, pb.CpeTask())
         ttl_sec = request.ttl_sec or TASK_TTL_SEC
         try:
             task = tasks.enqueue_task(
