@@ -19,3 +19,5 @@
 cwmp_interface: mtr0
 cwmp_address: 10.1.0.1
 cwmp_port: 48081
+# CPE connections served at once; further CPEs wait in the accept queue.
+cwmp_workers: 16

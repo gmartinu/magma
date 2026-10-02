@@ -10,6 +10,7 @@
 # limitations under the License.
 
 
+load("@python_deps//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("//bazel:test_constants.bzl", "TAG_SERVICE")
 
@@ -44,6 +45,8 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":acsd_lib",
+        ":server",
+        ":session",
         "//lte/protos:mconfigs_python_proto",
         "//orc8r/gateway/python/magma/common:sentry",
         "//orc8r/gateway/python/magma/common:service",
@@ -57,4 +60,28 @@ py_library(
     srcs = ["config.py"],
     visibility = ["//visibility:public"],
     deps = ["//lte/protos:mconfigs_python_proto"],
+)
+
+py_library(
+    name = "session",
+    srcs = ["session.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("spyne"),
+    ],
+)
+
+py_library(
+    name = "server",
+    srcs = ["server.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":acsd_lib",
+        "//lte/gateway/python/magma/tr069:models",
+        "//lte/gateway/python/magma/tr069:rpc_methods",
+        "//lte/gateway/python/magma/tr069:server",
+        "//lte/gateway/python/magma/tr069:spyne_mods",
+        requirement("spyne"),
+    ],
 )

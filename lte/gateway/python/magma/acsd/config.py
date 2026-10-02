@@ -18,6 +18,7 @@ from lte.protos.mconfig import mconfigs_pb2
 DEFAULT_CWMP_INTERFACE = 'mtr0'
 DEFAULT_CWMP_ADDRESS = '10.1.0.1'
 DEFAULT_CWMP_PORT = 48081
+DEFAULT_CWMP_WORKERS = 16
 
 
 class CwmpBind(NamedTuple):
@@ -45,3 +46,8 @@ def get_cwmp_bind(
         address=service_config.get('cwmp_address', DEFAULT_CWMP_ADDRESS),
         port=port,
     )
+
+
+def get_cwmp_workers(service_config: Dict[str, Any]) -> int:
+    """Size of the CWMP worker pool: CPE connections served at once."""
+    return max(1, int(service_config.get('cwmp_workers', DEFAULT_CWMP_WORKERS)))

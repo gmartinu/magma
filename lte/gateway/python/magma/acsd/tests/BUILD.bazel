@@ -30,8 +30,39 @@ pytest_test(
     deps = [
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:session",
         "//lte/protos:mconfigs_python_proto",
         requirement("protobuf"),
         requirement("pyyaml"),
+    ],
+)
+
+pytest_test(
+    name = "test_session",
+    size = "small",
+    srcs = ["test_session.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/tr069:models",
+    ],
+)
+
+pytest_test(
+    name = "test_server",
+    size = "small",
+    srcs = ["test_server.py"],
+    data = glob(["fixtures/*.xml"]),
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:server",
+        "//lte/gateway/python/magma/acsd:session",
     ],
 )
