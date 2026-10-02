@@ -66,3 +66,30 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:session",
     ],
 )
+
+pytest_test(
+    name = "test_identity",
+    size = "small",
+    srcs = ["test_identity.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_identity",
+        "//lte/protos:mobilityd_python_proto",
+        "//lte/protos:subscriberdb_python_proto",
+        requirement("grpcio"),
+    ],
+)
+
+pytest_test(
+    name = "test_bindings",
+    size = "small",
+    srcs = ["test_bindings.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = ["//lte/gateway/python/magma/acsd:acsd_identity"],
+)

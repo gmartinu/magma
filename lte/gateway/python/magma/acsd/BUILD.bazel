@@ -85,3 +85,18 @@ py_library(
         requirement("spyne"),
     ],
 )
+
+py_library(
+    name = "acsd_identity",
+    srcs = [
+        "bindings.py",
+        "identity.py",
+        "mobilityd_client.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lte/protos:mobilityd_python_grpc",
+        "//lte/protos:subscriberdb_python_proto",
+        "//orc8r/gateway/python/magma/common:service_registry",
+    ],
+)
