@@ -13,6 +13,7 @@
 import type {SectionsConfigs} from '../layout/Section';
 
 import * as React from 'react';
+import AcsDashboard from '../../views/acs/AcsDashboard';
 import AlarmIcon from '@mui/icons-material/Alarm';
 import AlarmsDashboard from '../../views/alarms/AlarmsDashboard';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -24,13 +25,17 @@ import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import NetworkDashboard from '../../views/network/NetworkDashboard';
 import PeopleIcon from '@mui/icons-material/People';
 import RouterIcon from '@mui/icons-material/Router';
+import SettingsRemoteIcon from '@mui/icons-material/SettingsRemote';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import SubscriberDashboard from '../../views/subscriber/SubscriberOverview';
 import TracingDashboard from '../../views/tracing/TracingDashboard';
 import TrafficDashboard from '../../views/traffic/TrafficOverview';
 import WifiTetheringIcon from '@mui/icons-material/WifiTethering';
 
-export function getLteSections(alertsEnabled: boolean): SectionsConfigs {
+export function getLteSections(
+  alertsEnabled: boolean,
+  acsEnabled = false,
+): SectionsConfigs {
   const sections: SectionsConfigs = [
     'dashboard', // landing path
     [
@@ -78,6 +83,14 @@ export function getLteSections(alertsEnabled: boolean): SectionsConfigs {
       },
     ],
   ];
+  if (acsEnabled) {
+    sections[1].push({
+      path: 'acs',
+      label: 'ACS',
+      icon: <SettingsRemoteIcon />,
+      component: AcsDashboard,
+    });
+  }
   if (alertsEnabled) {
     sections[1].push({
       path: 'alerts',

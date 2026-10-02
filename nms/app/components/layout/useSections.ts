@@ -34,6 +34,7 @@ export default function useSections(): SectionsConfigs {
   const {isFeatureEnabled} = useContext(AppContext);
   const [networkType, setNetworkType] = useState<NetworkType | null>(null);
   const alertsEnabled = isFeatureEnabled('alerts');
+  const acsEnabled = isFeatureEnabled('acs');
 
   useEffect(() => {
     const fetchNetworkType = async () => {
@@ -61,7 +62,7 @@ export default function useSections(): SectionsConfigs {
       return getFEGSections();
     case LTE:
     default: {
-      return getLteSections(alertsEnabled);
+      return getLteSections(alertsEnabled, acsEnabled);
     }
   }
 }

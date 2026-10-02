@@ -21,6 +21,7 @@ import Grid from '@mui/material/Grid';
 import IconButton from '@mui/material/IconButton';
 import LoadingFiller from '../../components/LoadingFiller';
 import OrganizationDialog from './OrganizationDialog';
+import OrganizationEntitlements from './OrganizationEntitlements';
 import OrganizationSummary from './OrganizationSummary';
 import OrganizationUsersTable from './OrganizationUsersTable';
 import OutlinedInput from '@mui/material/OutlinedInput';
@@ -331,6 +332,15 @@ function OrganizationEdit(props: WithAlert & Props) {
                   tableRef={tableRef}
                 />
               </Grid>
+
+              {organization && organization.name !== 'host' && (
+                <Grid item xs={12} data-testid="entitlementsSection">
+                  <Grid container className={classes.titleRow}>
+                    <Text variant="h6">Entitlements</Text>
+                  </Grid>
+                  <OrganizationEntitlements name={organization.name} />
+                </Grid>
+              )}
             </Grid>
           </Grid>
         </Grid>

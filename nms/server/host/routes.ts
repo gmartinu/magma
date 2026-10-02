@@ -15,6 +15,7 @@ import OrchestratorAPI from '../api/OrchestratorAPI';
 import Sequelize from 'sequelize';
 import asyncHandler from '../util/asyncHandler';
 import crypto from 'crypto';
+import entitlementRoutes from './entitlementRoutes';
 import featureConfigs, {FeatureConfig} from '../features';
 import logging from '../../shared/logging';
 import {
@@ -36,6 +37,8 @@ import type {FeatureID} from '../../shared/types/features';
 const logger = logging.getLogger(module);
 
 const router = Router();
+
+router.use(entitlementRoutes);
 
 router.get(
   '/organization/async',
