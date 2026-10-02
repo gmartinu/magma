@@ -190,3 +190,30 @@ pytest_test(
         requirement("fakeredis"),
     ],
 )
+
+pytest_test(
+    name = "test_datamodel_spec",
+    size = "small",
+    srcs = ["test_datamodel_spec.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = ["//lte/gateway/python/magma/acsd/datamodel"],
+)
+
+pytest_test(
+    name = "test_datamodel_registry",
+    size = "small",
+    srcs = ["test_datamodel_registry.py"],
+    data = glob(["fixtures/*.xml"]),
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:server",
+        "//lte/gateway/python/magma/acsd/datamodel",
+        "//lte/gateway/python/magma/tr069:models",
+    ],
+)
