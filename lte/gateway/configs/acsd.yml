@@ -35,3 +35,11 @@ cwmp_auth:
   password: ""
   # How long a Digest nonce is accepted; CPEs retry stale ones transparently.
   nonce_ttl_secs: 300
+
+# Per-CPE radio KPIs (acs_rsrp_dbm, acs_rsrq_db, acs_sinr_db), labelled by
+# cpe_key, for the online CPEs. Each CPE adds three series that metricsd
+# pushes to Orc8r, so past max_cpes the rest are left out
+# (acs_cpe_kpis_dropped counts them).
+cpe_kpis:
+  enabled: true
+  max_cpes: 200

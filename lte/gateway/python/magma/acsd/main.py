@@ -15,7 +15,7 @@ import _thread
 import asyncio
 import logging
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.config import (
@@ -26,13 +26,14 @@ from magma.acsd.config import (
     get_cwmp_bind,
     get_cwmp_workers,
 )
-from magma.acsd.cpe_state import CpeViews
+from magma.acsd.cpe_state import STATE_MAX_AGE_SEC, CpeViews
 from magma.acsd.digest import (
     DigestAuthenticator,
     NonceStore,
     StaticCredentialProvider,
 )
 from magma.acsd.identity import SessionIdentifier
+from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
 from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
@@ -47,17 +48,21 @@ def schedule_reaper(
     loop: asyncio.AbstractEventLoop,
     store: AcsStore,
     interval_sec: float = REAP_INTERVAL_SEC,
+    then: Optional[Callable[[], None]] = None,
 ) -> None:
     """
     Reap on a timer too: the handler only reaps when an Inform arrives, so
     on a quiet gateway dead sessions would linger in the state and pending
-    tasks would never expire.
+    tasks would never expire. `then` runs after each reap (the metric
+    gauges refresh).
     """
     def reap():
         try:
             store.reap_expired()
+            if then:
+                then()
         except Exception:  # pylint: disable=broad-except
-            logging.exception('Reaping acsd sessions and tasks failed')
+            logging.exception('acsd maintenance (reap, metrics) failed')
         finally:
             loop.call_later(interval_sec, reap)
     loop.call_soon(reap)
@@ -121,12 +126,15 @@ def main():
     config = load_service_config('acsd')
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
-    store = AcsStore(get_default_client())
+    metrics = AcsMetrics(get_cpe_kpi_config(config))
+    store = AcsStore(get_default_client(), listener=metrics)
     # A new process cannot continue the HTTP exchanges of the last one.
     requeued = store.end_all_sessions('acsd restarted')
     if requeued:
         logging.info('Requeued %d tasks left in progress', requeued)
-    handler = CwmpSessionHandler(identify=SessionIdentifier(), store=store)
+    handler = CwmpSessionHandler(
+        identify=SessionIdentifier(), store=store, observer=metrics,
+    )
     authenticator = make_authenticator(get_cwmp_auth(config))
     start_cwmp_listener(bind, handler, workers, authenticator)
     logging.info(
@@ -138,7 +146,10 @@ def main():
     views = CpeViews(handler.store, service.mconfig.periodic_inform_interval)
     service.register_operational_states_callback(views.operational_states)
     CpeManagerRpcServicer(handler.store, views).add_to_server(service.rpc_server)
-    schedule_reaper(service.loop, store)
+    schedule_reaper(
+        service.loop, store,
+        then=lambda: metrics.refresh(views.list(STATE_MAX_AGE_SEC), store.task_counts()),
+    )
 
     # Run the service loop
     service.run()
