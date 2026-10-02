@@ -76,7 +76,7 @@ def validate(task_type: str, args: Dict[str, Any]) -> None:
 
 def enqueue_task(
     store: AcsStore,
-    imsi: str,
+    cpe_key: str,
     task_type: str,
     parameter_names: Optional[Sequence[str]] = None,
     parameter_values: Optional[Sequence[Dict[str, str]]] = None,
@@ -86,7 +86,7 @@ def enqueue_task(
     ttl_sec: float = TASK_TTL_SEC,
 ) -> Task:
     """
-    Queue a task for the CPE behind `imsi`; it runs in the CPE's next CWMP
+    Queue a task for the CPE keyed `cpe_key`; it runs in the CPE's next CWMP
     session. parameter_values items are {'name', 'value', 'type'} with type
     an xsd type ('xsd:string' when left out). Raises InvalidTask.
     """
@@ -100,7 +100,7 @@ def enqueue_task(
     if next_level:
         args['next_level'] = True
     validate(task_type, args)
-    return store.create_task(imsi, task_type, args, max_attempts, ttl_sec)
+    return store.create_task(cpe_key, task_type, args, max_attempts, ttl_sec)
 
 
 def plan(
