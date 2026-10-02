@@ -17,21 +17,28 @@ import threading
 from typing import List, Optional
 
 from lte.protos.mconfig import mconfigs_pb2
+from magma.acsd.claimed import ClaimedMode
+from magma.acsd.claims import ClaimRegistry
 from magma.acsd.config import (
     AUTH_OFF,
+    MODE_CLAIMED,
+    MODE_CORE,
     CwmpAuthConfig,
     CwmpBind,
+    CwmpWanConfig,
     get_cwmp_auth,
     get_cwmp_bind,
+    get_cwmp_wan,
     get_cwmp_workers,
 )
+from magma.acsd.credentials import CredentialStore
 from magma.acsd.digest import (
     DigestAuthenticator,
     NonceStore,
     StaticCredentialProvider,
 )
 from magma.acsd.identity import SessionIdentifier
-from magma.acsd.server import make_cwmp_server
+from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
 from magma.acsd.session import CwmpSessionHandler
 from magma.acsd.store import AcsStore
 from magma.common.redis.client import get_default_client
@@ -68,18 +75,73 @@ def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
     )
 
 
+def make_claimed_mode(
+    wan: CwmpWanConfig, store: AcsStore, client,
+) -> Optional[ClaimedMode]:
+    """Claimed mode for the WAN listener, or None when it is off."""
+    if not wan.enabled:
+        return None
+    if not (wan.bootstrap_username and wan.bootstrap_password):
+        logging.error(
+            'cwmp_wan is on without a bootstrap credential; only claimed CPEs '
+            'that already rotated to a per-CPE one can get in',
+        )
+    return ClaimedMode(
+        ClaimRegistry(client), CredentialStore(client, wan.realm), store,
+        wan.bootstrap_username, wan.bootstrap_password,
+    )
+
+
+def start_wan_listener(
+    wan: CwmpWanConfig,
+    handler: CwmpSessionHandler,
+    claimed: ClaimedMode,
+    workers: int,
+    cwmp,
+) -> Optional[threading.Thread]:
+    """
+    Start the claimed listener, or log why it cannot start. A broken WAN
+    setup must not take the core listener down with it.
+    """
+    try:
+        context = make_tls_context(wan.cert_path, wan.key_path)
+    except (OSError, ValueError) as err:
+        logging.error(
+            'cwmp_wan listener not started: cannot load cert %r / key %r: %s',
+            wan.cert_path, wan.key_path, err,
+        )
+        return None
+    authenticator = DigestAuthenticator(
+        wan.realm, claimed, NonceStore(wan.nonce_ttl_secs),
+    )
+    thread = start_cwmp_listener(
+        wan.bind, handler, workers, authenticator,
+        mode=MODE_CLAIMED, ssl_context=context, cwmp=cwmp,
+    )
+    logging.info(
+        'CWMP claimed listener on https://%s:%d (%s)',
+        wan.bind.address, wan.bind.port, wan.bind.interface,
+    )
+    return thread
+
+
 def start_cwmp_listener(
     bind: CwmpBind,
     handler: CwmpSessionHandler,
     workers: int,
     authenticator: Optional[DigestAuthenticator] = None,
+    mode: str = MODE_CORE,
+    ssl_context=None,
+    cwmp=None,
 ) -> threading.Thread:
     """
     Serve CWMP on `bind` from a daemon thread. If the listener dies, the
     main thread is interrupted so systemd restarts acsd instead of leaving
     a healthy-looking service that no CPE can reach.
     """
-    server = make_cwmp_server(bind, handler, workers, authenticator)
+    server = make_cwmp_server(
+        bind, handler, workers, authenticator, mode, ssl_context, cwmp,
+    )
 
     def serve():
         try:
@@ -88,7 +150,9 @@ def start_cwmp_listener(
             logging.error('CWMP listener stopped; interrupting acsd')
             _thread.interrupt_main()
 
-    thread = threading.Thread(target=serve, name='cwmp-listener', daemon=True)
+    thread = threading.Thread(
+        target=serve, name='cwmp-listener-%s' % mode, daemon=True,
+    )
     thread.server = server
     thread.start()
     return thread
@@ -104,14 +168,24 @@ def main():
     config = load_service_config('acsd')
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
-    store = AcsStore(get_default_client())
+    client = get_default_client()
+    store = AcsStore(client)
     # A new process cannot continue the HTTP exchanges of the last one.
     requeued = store.end_all_sessions('acsd restarted')
     if requeued:
         logging.info('Requeued %d tasks left in progress', requeued)
-    handler = CwmpSessionHandler(identify=SessionIdentifier(), store=store)
-    authenticator = make_authenticator(get_cwmp_auth(config))
-    start_cwmp_listener(bind, handler, workers, authenticator)
+    auth = get_cwmp_auth(config)
+    wan = get_cwmp_wan(config, auth)
+    claimed = make_claimed_mode(wan, store, client)
+    handler = CwmpSessionHandler(
+        identify=SessionIdentifier(), store=store, claimed=claimed,
+    )
+    cwmp = make_cwmp_wsgi(handler)
+    start_cwmp_listener(
+        bind, handler, workers, make_authenticator(auth), cwmp=cwmp,
+    )
+    if claimed is not None:
+        start_wan_listener(wan, handler, claimed, workers, cwmp)
     logging.info(
         'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',
         mconfigs_pb2.AcsD.Mode.Name(service.mconfig.mode),

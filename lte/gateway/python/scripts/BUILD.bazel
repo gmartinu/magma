@@ -17,6 +17,7 @@ load("//bazel:runfiles.bzl", "expand_runfiles")
 load("//bazel:test_constants.bzl", "TAG_UTIL_SCRIPT")
 
 SCRIPTS = [
+    "acsd_cli",
     "agw_health_cli",
     "config_stateless_agw",
     "cpe_monitoring_cli",
@@ -124,6 +125,18 @@ py_binary(
         "//orc8r/gateway/python/magma/common/redis:client",
         "//orc8r/gateway/python/magma/configuration:mconfig_managers",
     ],
+)
+
+py_binary(
+    name = "acsd_cli",
+    srcs = ["acsd_cli.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    legacy_create_init = False,
+    tags = TAG_UTIL_SCRIPT,
+    deps = ["//lte/gateway/python/magma/acsd:cli"],
 )
 
 py_binary(

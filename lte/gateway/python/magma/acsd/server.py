@@ -13,12 +13,18 @@ limitations under the License.
 
 import io
 import logging
+import ssl
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable, List, Optional
 from wsgiref.simple_server import WSGIServer
 
-from magma.acsd.config import DEFAULT_CWMP_WORKERS, CwmpBind
+from magma.acsd.config import (
+    DEFAULT_CWMP_WORKERS,
+    LISTENER_MODE,
+    MODE_CORE,
+    CwmpBind,
+)
 from magma.acsd.digest import (
     CONNECTION_STATE,
     DigestAuthenticator,
@@ -35,6 +41,10 @@ from magma.tr069.spyne_mods import Tr069Application, Tr069Soap11
 from spyne.server.wsgi import WsgiApplication
 
 WsgiApp = Callable[[dict, Callable], Iterable[bytes]]
+
+# A CPE that connects and never finishes the TLS handshake must not hold a
+# worker forever.
+TLS_HANDSHAKE_TIMEOUT_SEC = 30.0
 
 
 class CwmpWsgiApp:
@@ -95,13 +105,11 @@ def _echo_cwmp_id(ctx) -> None:
         ctx.out_header.Data = ctx.in_header.Data
 
 
-def make_cwmp_app(
-    handler: Tr069MessageHandler,
-    authenticator: Optional[DigestAuthenticator] = None,
-) -> WsgiApp:
+def make_cwmp_wsgi(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     """
-    Build the CWMP WSGI app with `handler` owning every CPE message, behind
-    Digest authentication when `authenticator` is given.
+    The CWMP WSGI app with `handler` owning every CPE message. The spyne
+    service and its handler are process-wide (class attributes), so every
+    listener must share this one app and its lock.
     """
     AutoConfigServer.set_state_machine_manager(handler)
     app = Tr069Application(
@@ -111,10 +119,33 @@ def make_cwmp_app(
     )
     # App-level listener: fires after the RPC body, before serialization.
     app.event_manager.add_listener('method_return_object', _echo_cwmp_id)
-    cwmp = CwmpWsgiApp(WsgiApplication(app))
-    if authenticator is None:
-        return cwmp
-    return DigestAuthMiddleware(cwmp, authenticator)
+    return CwmpWsgiApp(WsgiApplication(app))
+
+
+def make_cwmp_app(
+    handler: Tr069MessageHandler,
+    authenticator: Optional[DigestAuthenticator] = None,
+    mode: str = MODE_CORE,
+    cwmp: Optional[CwmpWsgiApp] = None,
+) -> WsgiApp:
+    """
+    The app of one listener: the shared `cwmp` app (built for `handler`
+    when not given) behind Digest when `authenticator` is given, with every
+    request tagged with the listener's identity mode.
+    """
+    app: WsgiApp = cwmp or make_cwmp_wsgi(handler)
+    if authenticator is not None:
+        app = DigestAuthMiddleware(app, authenticator)
+    return _ModeTag(app, mode)
+
+
+class _ModeTag:
+    def __init__(self, app: WsgiApp, mode: str):
+        self._app, self._mode = app, mode
+
+    def __call__(self, environ: dict, start_response: Callable):
+        environ[LISTENER_MODE] = self._mode
+        return self._app(environ, start_response)
 
 
 class PooledWSGIServer(WSGIServer):
@@ -127,8 +158,15 @@ class PooledWSGIServer(WSGIServer):
     # inform at once, e.g. after the gateway restarts.
     request_queue_size = 128
 
-    def __init__(self, server_address, handler_class, workers: int):
+    def __init__(
+        self,
+        server_address,
+        handler_class,
+        workers: int,
+        ssl_context: Optional[ssl.SSLContext] = None,
+    ):
         super().__init__(server_address, handler_class)
+        self._ssl_context = ssl_context
         self._pool = ThreadPoolExecutor(
             max_workers=workers, thread_name_prefix='cwmp',
         )
@@ -138,11 +176,27 @@ class PooledWSGIServer(WSGIServer):
 
     def _process(self, request, client_address):
         try:
+            if self._ssl_context is not None:
+                # In the worker, so a slow handshake never stalls accept().
+                request = self._handshake(request, client_address)
+                if request is None:
+                    return
             self.finish_request(request, client_address)
         except Exception:  # pylint: disable=broad-except
             self.handle_error(request, client_address)
         finally:
             self.shutdown_request(request)
+
+    def _handshake(self, request, client_address):
+        request.settimeout(TLS_HANDSHAKE_TIMEOUT_SEC)
+        try:
+            tls = self._ssl_context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError) as err:
+            logging.info('TLS handshake with %s failed: %s', client_address, err)
+            self.shutdown_request(request)
+            return None
+        tls.settimeout(None)
+        return tls
 
     def handle_error(self, request, client_address):
         logging.exception('CWMP connection from %s failed', client_address)
@@ -163,6 +217,10 @@ class CwmpRequestHandler(tr069_WSGIRequestHandler):
     def get_environ(self):
         environ = super().get_environ()
         environ[CONNECTION_STATE] = self.connection_state
+        # wsgiref leaves it out; claimed sessions are keyed by connection.
+        environ['REMOTE_PORT'] = str(self.client_address[1])
+        if isinstance(self.connection, ssl.SSLSocket):
+            environ['wsgi.url_scheme'], environ['HTTPS'] = 'https', 'on'
         return environ
 
 
@@ -171,10 +229,25 @@ def make_cwmp_server(
     handler: Tr069MessageHandler,
     workers: int = DEFAULT_CWMP_WORKERS,
     authenticator: Optional[DigestAuthenticator] = None,
+    mode: str = MODE_CORE,
+    ssl_context: Optional[ssl.SSLContext] = None,
+    cwmp: Optional[CwmpWsgiApp] = None,
 ) -> PooledWSGIServer:
-    """Create (but do not start) the CWMP listener on `bind`."""
+    """
+    Create (but do not start) a CWMP listener on `bind`, serving HTTPS
+    when `ssl_context` is given. Listeners of one process pass the same
+    `cwmp` app (make_cwmp_wsgi).
+    """
     server = PooledWSGIServer(
-        (bind.address, bind.port), CwmpRequestHandler, workers,
+        (bind.address, bind.port), CwmpRequestHandler, workers, ssl_context,
     )
-    server.set_app(make_cwmp_app(handler, authenticator))
+    server.set_app(make_cwmp_app(handler, authenticator, mode, cwmp))
     return server
+
+
+def make_tls_context(cert_path: str, key_path: str) -> ssl.SSLContext:
+    """Server-side TLS 1.2+ without client certificates (MVP)."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert_path, key_path)
+    return context

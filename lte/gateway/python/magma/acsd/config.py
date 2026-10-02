@@ -21,6 +21,13 @@ DEFAULT_CWMP_ADDRESS = '10.1.0.1'
 DEFAULT_CWMP_PORT = 48081
 DEFAULT_CWMP_WORKERS = 16
 
+# Identity modes of a CWMP listener: `core` names the CPE by the IMSI
+# behind its source IP on mtr0; `claimed` by its claim and per-CPE Digest.
+MODE_CORE = 'core'
+MODE_CLAIMED = 'claimed'
+# WSGI environ key with the mode of the listener a request came in on.
+LISTENER_MODE = 'acsd.listener_mode'
+
 AUTH_OFF = 'off'
 AUTH_REQUIRED = 'required'
 DEFAULT_AUTH_REALM = 'magma-acs'
@@ -95,5 +102,54 @@ def get_cwmp_auth(service_config: Dict[str, Any]) -> CwmpAuthConfig:
         password=str(section.get('password') or ''),
         nonce_ttl_secs=max(
             1, int(section.get('nonce_ttl_secs', DEFAULT_NONCE_TTL_SECS)),
+        ),
+    )
+
+
+DEFAULT_WAN_INTERFACE = 'eth0'
+DEFAULT_WAN_ADDRESS = '0.0.0.0'
+DEFAULT_WAN_PORT = 48443
+
+
+@dataclass(frozen=True)
+class CwmpWanConfig:
+    """
+    The claimed-mode listener on the WAN side: HTTPS, Digest always, and
+    the bootstrap credential claimed CPEs start with.
+    """
+    enabled: bool = False
+    bind: CwmpBind = CwmpBind(DEFAULT_WAN_INTERFACE, DEFAULT_WAN_ADDRESS, DEFAULT_WAN_PORT)
+    cert_path: str = ''
+    key_path: str = ''
+    realm: str = DEFAULT_AUTH_REALM
+    bootstrap_username: str = ''
+    bootstrap_password: str = field(default='', repr=False)
+    nonce_ttl_secs: int = DEFAULT_NONCE_TTL_SECS
+
+
+def get_cwmp_wan(
+    service_config: Dict[str, Any], auth: CwmpAuthConfig,
+) -> CwmpWanConfig:
+    """
+    Resolve the `cwmp_wan` section of acsd.yml. The realm, bootstrap
+    credential and nonce TTL default to cwmp_auth's, so one shared
+    credential bootstraps CPEs on either listener; the WAN listener requires
+    Digest even when cwmp_auth is off.
+    """
+    section = service_config.get('cwmp_wan') or {}
+    return CwmpWanConfig(
+        enabled=section.get('enabled') is True,
+        bind=CwmpBind(
+            interface=str(section.get('interface') or DEFAULT_WAN_INTERFACE),
+            address=str(section.get('address') or DEFAULT_WAN_ADDRESS),
+            port=int(section.get('port') or DEFAULT_WAN_PORT),
+        ),
+        cert_path=str(section.get('cert_path') or ''),
+        key_path=str(section.get('key_path') or ''),
+        realm=str(section.get('realm') or auth.realm),
+        bootstrap_username=str(section.get('bootstrap_username') or auth.username),
+        bootstrap_password=str(section.get('bootstrap_password') or auth.password),
+        nonce_ttl_secs=max(
+            1, int(section.get('nonce_ttl_secs') or auth.nonce_ttl_secs),
         ),
     )

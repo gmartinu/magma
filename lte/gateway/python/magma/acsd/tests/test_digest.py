@@ -22,8 +22,10 @@ import fakeredis
 from magma.acsd.config import CwmpBind
 from magma.acsd.digest import (
     DigestAuthenticator,
+    Ha1,
     NonceStore,
     StaticCredentialProvider,
+    ha1_of,
     parse_digest,
 )
 from magma.acsd.server import make_cwmp_server
@@ -174,6 +176,33 @@ class DigestAuthenticatorTest(unittest.TestCase):
         client = DigestClient(algorithm='SHA-256')
         client.nonce = self.client.nonce
         self.assertTrue(self._check(client.header()).ok)
+
+    def test_stored_ha1_stands_for_the_password(self):
+        class Ha1Provider:
+            def lookup(self, username, source_ip):
+                return ha1_of(username, REALM, PASSWORD) if username == USER else None
+
+        auth = DigestAuthenticator(REALM, Ha1Provider(), NonceStore(300))
+        client = DigestClient()
+        client.take_challenge(auth.challenge())
+        self.assertTrue(auth.authenticate('POST', '/', client.header(), '10.0.0.2').ok)
+        wrong = DigestClient(password='other')
+        wrong.take_challenge(auth.challenge())
+        self.assertEqual(
+            auth.authenticate('POST', '/', wrong.header(), '10.0.0.2').reason,
+            'wrong response',
+        )
+        sha = DigestClient(algorithm='SHA-256')
+        sha.take_challenge(auth.challenge())
+        self.assertEqual(
+            auth.authenticate('POST', '/', sha.header(), '10.0.0.2').reason,
+            'stored credential needs MD5',
+        )
+
+    def test_ha1_of(self):
+        expected = hashlib.md5(b'u:r:p').hexdigest()
+        self.assertEqual(ha1_of('u', 'r', 'p'), expected)
+        self.assertIsInstance(ha1_of('u', 'r', 'p'), Ha1)
 
     def test_unsupported_parameters(self):
         header = self.client.header()

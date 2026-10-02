@@ -172,3 +172,22 @@ def as_dict(x: Any) -> Union[Dict, List, str]:
     elif isinstance(x, list):
         return [as_dict(v) for v in x]
     return str(x)
+
+
+REDACTED = '<redacted>'
+
+
+def redact_secrets(x: Any) -> Any:
+    """
+    as_dict() output with the value of every parameter named *Password
+    replaced, so debug logs of a SetParameterValues that sets ACS or
+    ConnectionRequest credentials do not carry them.
+    """
+    if isinstance(x, dict):
+        name = x.get('Name')
+        if 'Value' in x and isinstance(name, str) and name.lower().endswith('password'):
+            return {**x, 'Value': REDACTED}
+        return {k: redact_secrets(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [redact_secrets(v) for v in x]
+    return x
