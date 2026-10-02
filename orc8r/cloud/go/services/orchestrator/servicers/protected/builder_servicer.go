@@ -89,7 +89,7 @@ func (b *baseOrchestratorBuilder) Build(network *storage.Network, graph *storage
 	vals := map[string]proto.Message{}
 	if gateway.Config != nil {
 		gatewayConfig := gateway.Config.(*models.MagmadGatewayConfigs)
-		vals["magmad"], err = getMagmadMconfig(&gateway, &nativeGraph, gatewayConfig)
+		vals["magmad"], err = getMagmadMconfig(networkID, &gateway, &nativeGraph, gatewayConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +111,7 @@ func (b *baseOrchestratorBuilder) Build(network *storage.Network, graph *storage
 }
 
 func getMagmadMconfig(
-	gateway *configurator.NetworkEntity, graph *configurator.EntityGraph, gatewayConfig *models.MagmadGatewayConfigs,
+	networkID string, gateway *configurator.NetworkEntity, graph *configurator.EntityGraph, gatewayConfig *models.MagmadGatewayConfigs,
 ) (*mconfig_protos.MagmaD, error) {
 	version, images, err := getPackageVersionAndImages(gateway, graph)
 	if err != nil {
@@ -126,7 +126,7 @@ func getMagmadMconfig(
 		AutoupgradePollInterval: gatewayConfig.AutoupgradePollInterval,
 		PackageVersion:          version,
 		Images:                  images,
-		DynamicServices:         gatewayConfig.DynamicServices,
+		DynamicServices:         filterLicensedServices(context.Background(), networkID, gatewayConfig.DynamicServices),
 		FeatureFlags:            gatewayConfig.FeatureFlags,
 	}
 
