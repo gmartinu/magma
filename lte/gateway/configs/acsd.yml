@@ -21,3 +21,17 @@ cwmp_address: 10.1.0.1
 cwmp_port: 48081
 # CPE connections served at once; further CPEs wait in the accept queue.
 cwmp_workers: 16
+
+# HTTP Digest authentication of CPEs, checked on top of the CPE identity
+# (source IP -> IMSI). mode: required (default) or off. CPEs must be set with
+# ManagementServer.Username/Password matching username/password below; with
+# no credential set, every CPE is refused with 401. Never commit a password:
+# set it in the gateway override /var/opt/magma/configs/acsd.yml, which
+# replaces top-level keys, so copy the whole cwmp_auth section there.
+cwmp_auth:
+  mode: required
+  realm: magma-acs
+  username: ""
+  password: ""
+  # How long a Digest nonce is accepted; CPEs retry stale ones transparently.
+  nonce_ttl_secs: 300

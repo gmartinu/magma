@@ -15,10 +15,15 @@ import io
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Iterable, List
+from typing import Callable, Iterable, List, Optional
 from wsgiref.simple_server import WSGIServer
 
 from magma.acsd.config import DEFAULT_CWMP_WORKERS, CwmpBind
+from magma.acsd.digest import (
+    CONNECTION_STATE,
+    DigestAuthenticator,
+    DigestAuthMiddleware,
+)
 from magma.tr069.models import CWMP_NS
 from magma.tr069.rpc_methods import (
     RPC_RESPONSES,
@@ -90,8 +95,14 @@ def _echo_cwmp_id(ctx) -> None:
         ctx.out_header.Data = ctx.in_header.Data
 
 
-def make_cwmp_app(handler: Tr069MessageHandler) -> CwmpWsgiApp:
-    """Build the CWMP WSGI app with `handler` owning every CPE message."""
+def make_cwmp_app(
+    handler: Tr069MessageHandler,
+    authenticator: Optional[DigestAuthenticator] = None,
+) -> WsgiApp:
+    """
+    Build the CWMP WSGI app with `handler` owning every CPE message, behind
+    Digest authentication when `authenticator` is given.
+    """
     AutoConfigServer.set_state_machine_manager(handler)
     app = Tr069Application(
         [AutoConfigServer], CWMP_NS,
@@ -100,7 +111,10 @@ def make_cwmp_app(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     )
     # App-level listener: fires after the RPC body, before serialization.
     app.event_manager.add_listener('method_return_object', _echo_cwmp_id)
-    return CwmpWsgiApp(WsgiApplication(app))
+    cwmp = CwmpWsgiApp(WsgiApplication(app))
+    if authenticator is None:
+        return cwmp
+    return DigestAuthMiddleware(cwmp, authenticator)
 
 
 class PooledWSGIServer(WSGIServer):
@@ -141,15 +155,26 @@ class PooledWSGIServer(WSGIServer):
 class CwmpRequestHandler(tr069_WSGIRequestHandler):
     device_name = 'CPE'
 
+    def handle(self):
+        # One instance serves one TCP connection, keep-alive included.
+        self.connection_state = {}  # pylint: disable=attribute-defined-outside-init
+        super().handle()
+
+    def get_environ(self):
+        environ = super().get_environ()
+        environ[CONNECTION_STATE] = self.connection_state
+        return environ
+
 
 def make_cwmp_server(
     bind: CwmpBind,
     handler: Tr069MessageHandler,
     workers: int = DEFAULT_CWMP_WORKERS,
+    authenticator: Optional[DigestAuthenticator] = None,
 ) -> PooledWSGIServer:
     """Create (but do not start) the CWMP listener on `bind`."""
     server = PooledWSGIServer(
         (bind.address, bind.port), CwmpRequestHandler, workers,
     )
-    server.set_app(make_cwmp_app(handler))
+    server.set_app(make_cwmp_app(handler, authenticator))
     return server

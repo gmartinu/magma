@@ -14,10 +14,22 @@ limitations under the License.
 import _thread
 import logging
 import threading
-from typing import List
+from typing import List, Optional
 
 from lte.protos.mconfig import mconfigs_pb2
-from magma.acsd.config import CwmpBind, get_cwmp_bind, get_cwmp_workers
+from magma.acsd.config import (
+    AUTH_OFF,
+    CwmpAuthConfig,
+    CwmpBind,
+    get_cwmp_auth,
+    get_cwmp_bind,
+    get_cwmp_workers,
+)
+from magma.acsd.digest import (
+    DigestAuthenticator,
+    NonceStore,
+    StaticCredentialProvider,
+)
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
@@ -34,17 +46,40 @@ def _get_operational_states() -> List[State]:
     return []
 
 
+def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
+    """The Digest authenticator for `auth`, or None when it is off."""
+    if auth.mode == AUTH_OFF:
+        logging.warning('CWMP Digest authentication is off')
+        return None
+    if not auth.has_credential:
+        logging.error(
+            'CWMP Digest authentication is required but cwmp_auth has no '
+            'username/password; every CPE will be refused with 401',
+        )
+    else:
+        logging.info(
+            'CWMP Digest authentication required (realm %s, user %s)',
+            auth.realm, auth.username,
+        )
+    return DigestAuthenticator(
+        auth.realm,
+        StaticCredentialProvider(auth.username, auth.password),
+        NonceStore(auth.nonce_ttl_secs),
+    )
+
+
 def start_cwmp_listener(
     bind: CwmpBind,
     handler: CwmpSessionHandler,
     workers: int,
+    authenticator: Optional[DigestAuthenticator] = None,
 ) -> threading.Thread:
     """
     Serve CWMP on `bind` from a daemon thread. If the listener dies, the
     main thread is interrupted so systemd restarts acsd instead of leaving
     a healthy-looking service that no CPE can reach.
     """
-    server = make_cwmp_server(bind, handler, workers)
+    server = make_cwmp_server(bind, handler, workers, authenticator)
 
     def serve():
         try:
@@ -75,7 +110,8 @@ def main():
     if requeued:
         logging.info('Requeued %d tasks left in progress', requeued)
     handler = CwmpSessionHandler(identify=SessionIdentifier(), store=store)
-    start_cwmp_listener(bind, handler, workers)
+    authenticator = make_authenticator(get_cwmp_auth(config))
+    start_cwmp_listener(bind, handler, workers, authenticator)
     logging.info(
         'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',
         mconfigs_pb2.AcsD.Mode.Name(service.mconfig.mode),

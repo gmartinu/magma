@@ -46,6 +46,7 @@ py_library(
     deps = [
         ":acsd_identity",
         ":acsd_lib",
+        ":digest",
         ":server",
         ":session",
         ":store",
@@ -83,12 +84,19 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":acsd_lib",
+        ":digest",
         "//lte/gateway/python/magma/tr069:models",
         "//lte/gateway/python/magma/tr069:rpc_methods",
         "//lte/gateway/python/magma/tr069:server",
         "//lte/gateway/python/magma/tr069:spyne_mods",
         requirement("spyne"),
     ],
+)
+
+py_library(
+    name = "digest",
+    srcs = ["digest.py"],
+    visibility = ["//visibility:public"],
 )
 
 py_library(
