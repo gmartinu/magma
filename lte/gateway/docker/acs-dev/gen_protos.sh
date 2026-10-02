@@ -21,4 +21,7 @@ mapfile -t PROTOS < <(find lte/protos orc8r/protos feg/protos dp/protos \
   -name '*.proto' -not -path '*/prometheus/*')
 python3 -m grpc_tools.protoc -I /magma -I /magma/orc8r/protos/prometheus \
   --python_out=/out --grpc_python_out=/out "${PROTOS[@]}"
+# acsd's CpeManager API (lte/protos/cpe_acs.proto) is new in the fork; the
+# smoke test and acsd itself import these stubs.
+test -s /out/lte/protos/cpe_acs_pb2_grpc.py
 echo "generated ${#PROTOS[@]} protos into /out"
