@@ -31,7 +31,9 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:acsd_main",
         "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
         "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
         requirement("protobuf"),
         requirement("pyyaml"),
     ],
@@ -47,7 +49,9 @@ pytest_test(
     ],
     deps = [
         "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
         "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
     ],
 )
 
@@ -64,6 +68,8 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:server",
         "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
     ],
 )
 
@@ -108,8 +114,10 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:server",
         "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
         "//lte/gateway/python/magma/tr069:models",
         "//lte/protos:subscriberdb_python_proto",
+        requirement("fakeredis"),
         requirement("grpcio"),
     ],
 )
@@ -124,6 +132,42 @@ pytest_test(
     ],
     deps = [
         "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_tasks",
+    size = "small",
+    srcs = ["test_tasks.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_session_tasks",
+    size = "small",
+    srcs = ["test_session_tasks.py"],
+    data = glob(["fixtures/*.xml"]),
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:server",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/tr069:models",
         requirement("fakeredis"),
     ],
 )
