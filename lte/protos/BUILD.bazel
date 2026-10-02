@@ -561,6 +561,22 @@ python_grpc_library(
     ],
 )
 
+proto_library(
+    name = "cpe_acs_proto",
+    srcs = ["cpe_acs.proto"],
+    deps = ["@com_google_protobuf//:struct_proto"],
+)
+
+python_proto_library(
+    name = "cpe_acs_python_proto",
+    protos = [":cpe_acs_proto"],
+)
+
+python_grpc_library(
+    name = "cpe_acs_python_grpc",
+    protos = [":cpe_acs_proto"],
+)
+
 python_grpc_library(
     name = "s1ap_service_python_grpc",
     protos = [":s1ap_service_proto"],
@@ -579,6 +595,7 @@ proto_library(
         "//orc8r/protos:digest_proto",
         "//orc8r/protos:service303_proto",
         "@com_google_protobuf//:field_mask_proto",
+        "@com_google_protobuf//:struct_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
 )
