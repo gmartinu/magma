@@ -37,7 +37,7 @@ from spyne.model.complex import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
 
 # Names the CPE behind `source_ip`: returns the key the session is held
-# under (the IMSI, in acsd), or None to refuse the session
+# under (the cpe_key: the IMSI in core mode), or None to refuse the session
 # (HTTP 403). Called once per session, on its Inform.
 IdentifyFn = Callable[[str, models.Inform], Optional[str]]
 
@@ -57,7 +57,7 @@ def source_ip_of(ctx: WsgiMethodContext) -> str:
 class CwmpSessionHandler:
     """
     CWMP session flow for acsd: answer the Inform, then, from the CPE's
-    empty POST on, send the tasks queued for its IMSI one RPC per HTTP
+    empty POST on, send the tasks queued for its cpe_key one RPC per HTTP
     exchange, record each answer or Fault on the task, and end the session
     (204) once the queue is empty.
 
@@ -91,7 +91,7 @@ class CwmpSessionHandler:
     def session_identity(self, source_ip: str) -> Optional[str]:
         """The identity of the session open from source_ip, if any."""
         session = self._store.get_session(source_ip)
-        return session.imsi if session else None
+        return session.cpe_key if session else None
 
     def handle_tr069_message(
         self,
@@ -136,12 +136,12 @@ class CwmpSessionHandler:
         self._maybe_reap()
         # A new Inform means the CPE gave up on any session it had open.
         self._store.end_session(source_ip, 'CPE started a new session')
-        self._store.end_imsi_sessions(identity, 'CPE started a new session')
+        self._store.end_cpe_sessions(identity, 'CPE started a new session')
         values = _inform_values(inform)
         handler = self._registry.select(device_info(inform, values))
         session = Session(
             session_id=uuid.uuid4().hex,
-            imsi=identity,
+            cpe_key=identity,
             source_ip=source_ip,
             root=detect_root(values) or ROOT_TR181,
             model_handler=handler.name,
@@ -210,7 +210,7 @@ class CwmpSessionHandler:
         request = self._next_request(session)
         if request is None:
             self._store.end_session(session.source_ip, 'session ended')
-            logging.info('Session of %s done', session.imsi)
+            logging.info('Session of %s done', session.cpe_key)
             return models.DummyInput()
         session.pending_method = type(request).__name__
         # Stored before the request goes out, so the answer finds it.
@@ -225,7 +225,7 @@ class CwmpSessionHandler:
                 return plan[session.task_step]
             self._clear_task(session)
         while True:
-            task = self._store.claim_next_task(session.imsi, session.session_id)
+            task = self._store.claim_next_task(session.cpe_key, session.session_id)
             if task is None:
                 return None
             try:
@@ -240,7 +240,7 @@ class CwmpSessionHandler:
                 continue
             logging.info(
                 'Running task %s (%s) on %s, attempt %d',
-                task.task_id, task.type, session.imsi, task.attempts,
+                task.task_id, task.type, session.cpe_key, task.attempts,
             )
             session.pending_task_id, session.task_step = task.task_id, 0
             return plan[0]
@@ -267,10 +267,10 @@ class CwmpSessionHandler:
 
     def _finish(self, session: Session, task: Task, result: Dict[str, Any]) -> None:
         if result.get('values'):
-            self._store.merge_parameters(session.imsi, result['values'])
+            self._store.merge_parameters(session.cpe_key, result['values'])
             self._update_model(session)
         self._store.complete_task(task.task_id, result)
-        logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.imsi)
+        logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.cpe_key)
 
     def _fail(
         self, session: Session, task: Task, code: int, text: str, retry: bool,
@@ -279,7 +279,7 @@ class CwmpSessionHandler:
         failed = self._store.fail_task(task.task_id, code, text, retry)
         logging.warning(
             'Task %s (%s) on %s fault %d: %s; now %s',
-            task.task_id, task.type, session.imsi, code, text, failed.status,
+            task.task_id, task.type, session.cpe_key, code, text, failed.status,
         )
 
     def _update_model(
@@ -291,21 +291,21 @@ class CwmpSessionHandler:
         identity of the stored model fills the fields the snapshot lacks.
         """
         handler = self._handler(session)
-        snapshot = self._store.get_parameters(session.imsi)
+        snapshot = self._store.get_parameters(session.cpe_key)
         try:
             model = handler.normalize(session.root, snapshot.values)
         except Exception:  # pylint: disable=broad-except
             # A broken vendor table must not cost the CPE its session.
             logging.exception(
-                'Handler %s cannot normalize %s', handler.name, session.imsi,
+                'Handler %s cannot normalize %s', handler.name, session.cpe_key,
             )
             return
         if identity is None:
-            stored = self._store.get_model(session.imsi)
+            stored = self._store.get_model(session.cpe_key)
             identity = stored.model.get('identity', {}) if stored else {}
         fill_identity(model, identity)
         _set_wan_address(model, session.source_ip)
-        self._store.put_model(session.imsi, handler.name, model.to_dict())
+        self._store.put_model(session.cpe_key, handler.name, model.to_dict())
 
     @staticmethod
     def _clear_task(session: Session) -> None:

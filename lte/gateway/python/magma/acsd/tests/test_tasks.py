@@ -23,7 +23,7 @@ IMSI = 'IMSI001010000000001'
 
 
 def _task(task_type, **args):
-    return Task(task_id='a' * 32, imsi=IMSI, type=task_type, args=args)
+    return Task(task_id='a' * 32, cpe_key=IMSI, type=task_type, args=args)
 
 
 class ValidateTest(unittest.TestCase):

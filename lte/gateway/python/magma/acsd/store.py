@@ -46,7 +46,7 @@ class TaskNotFound(KeyError):
 class Task:
     """An operation queued for a CPE, run in its next session."""
     task_id: str
-    imsi: str
+    cpe_key: str
     type: str
     args: Dict[str, Any] = field(default_factory=dict)
     status: str = TASK_PENDING
@@ -71,7 +71,7 @@ class Session:
     apart by address (no cookies).
     """
     session_id: str
-    imsi: str
+    cpe_key: str
     source_ip: str
     # Data model root from the Inform: 'Device.' or 'InternetGatewayDevice.'.
     root: str = 'Device.'
@@ -86,7 +86,7 @@ class Session:
 
 @dataclass
 class ParameterSnapshot:
-    imsi: str
+    cpe_key: str
     values: Dict[str, str] = field(default_factory=dict)
     updated: float = 0.0
 
@@ -94,7 +94,7 @@ class ParameterSnapshot:
 @dataclass
 class CpeModel:
     """The normalized model of a CPE (datamodel.Model.to_dict())."""
-    imsi: str
+    cpe_key: str
     handler: str = ''
     model: Dict[str, Any] = field(default_factory=dict)
     updated: float = 0.0
@@ -118,10 +118,15 @@ class ReapResult:
 
 class AcsStore:
     """
-    acsd state in Redis: open sessions, the per-IMSI task queue, the last
-    parameter snapshot, the normalized model and inform counters. Task
-    semantics follow the Go ACSStorage of the cloud ACS (claim, retry,
-    fail, timeout).
+    acsd state in Redis: open sessions, the per-CPE task queue, the last
+    parameter snapshot, the normalized model and inform counters.
+
+    Every per-CPE record is keyed by an opaque `cpe_key`: the IMSI
+    ("IMSI<digits>") for CPEs on the Magma core, a claim key for claimed
+    CPEs outside it. The store never parses it.
+
+    Task semantics follow the Go ACSStorage of the cloud ACS (claim,
+    retry, fail, timeout).
 
     acsd is the only writer of these keys, so compound updates are made
     atomic with a process lock rather than Redis transactions; every single
@@ -146,7 +151,7 @@ class AcsStore:
             )
         self._sessions = hash_dict('sessions')
         self._tasks = hash_dict('tasks')
-        # IMSI -> task IDs in creation order, which is the run order.
+        # cpe_key -> task IDs in creation order, which is the run order.
         self._queues = hash_dict('queues')
         self._params = hash_dict('params')
         self._models = hash_dict('models')
@@ -181,12 +186,12 @@ class AcsStore:
             raw = self._sessions.pop(source_ip, None)
             if raw is None:
                 return 0
-            return self._release_tasks(raw['imsi'], {raw['session_id']}, reason)
+            return self._release_tasks(raw['cpe_key'], {raw['session_id']}, reason)
 
-    def end_imsi_sessions(self, imsi: str, reason: str) -> int:
+    def end_cpe_sessions(self, cpe_key: str, reason: str) -> int:
         """Close every session of a CPE, e.g. when it starts a new one."""
         with self._lock:
-            ips = [s.source_ip for s in self.list_sessions() if s.imsi == imsi]
+            ips = [s.source_ip for s in self.list_sessions() if s.cpe_key == cpe_key]
             return sum(self.end_session(ip, reason) for ip in ips)
 
     def end_all_sessions(self, reason: str) -> int:
@@ -221,7 +226,7 @@ class AcsStore:
 
     def create_task(
         self,
-        imsi: str,
+        cpe_key: str,
         task_type: str,
         args: Optional[Dict[str, Any]] = None,
         max_attempts: int = TASK_MAX_ATTEMPTS,
@@ -233,7 +238,7 @@ class AcsStore:
             now = self._clock()
             task = Task(
                 task_id=uuid.uuid4().hex,
-                imsi=imsi,
+                cpe_key=cpe_key,
                 type=task_type,
                 args=dict(args or {}),
                 max_attempts=max(1, max_attempts),
@@ -242,27 +247,27 @@ class AcsStore:
                 deadline=now + ttl_sec if ttl_sec > 0 else 0.0,
             )
             self._save(task)
-            queue = self._queues.get(imsi, [])
+            queue = self._queues.get(cpe_key, [])
             queue.append(task.task_id)
-            self._queues[imsi] = self._prune(queue)
+            self._queues[cpe_key] = self._prune(queue)
             return task
 
     def get_task(self, task_id: str) -> Optional[Task]:
         raw = self._tasks.get(task_id)
         return Task(**raw) if raw is not None else None
 
-    def list_tasks(self, imsi: str) -> List[Task]:
+    def list_tasks(self, cpe_key: str) -> List[Task]:
         """The tasks of a CPE in run order."""
-        tasks = (self.get_task(t) for t in self._queues.get(imsi, []))
+        tasks = (self.get_task(t) for t in self._queues.get(cpe_key, []))
         return [t for t in tasks if t is not None]
 
-    def pending_count(self, imsi: str) -> int:
+    def pending_count(self, cpe_key: str) -> int:
         return sum(
             t.status in (TASK_PENDING, TASK_IN_PROGRESS)
-            for t in self.list_tasks(imsi)
+            for t in self.list_tasks(cpe_key)
         )
 
-    def claim_next_task(self, imsi: str, session_id: str) -> Optional[Task]:
+    def claim_next_task(self, cpe_key: str, session_id: str) -> Optional[Task]:
         """
         Mark the oldest runnable task of the CPE in progress in the session
         and return it, or None. A task requeued by a fault in this session
@@ -270,7 +275,7 @@ class AcsStore:
         """
         with self._lock:
             now = self._clock()
-            for task in self.list_tasks(imsi):
+            for task in self.list_tasks(cpe_key):
                 if task.status != TASK_PENDING or task.session_id == session_id:
                     continue
                 if _past(task.deadline, now):
@@ -328,49 +333,49 @@ class AcsStore:
     # Parameters and informs
 
     def merge_parameters(
-        self, imsi: str, values: Dict[str, str],
+        self, cpe_key: str, values: Dict[str, str],
     ) -> ParameterSnapshot:
         """Merge values the CPE reported onto its last snapshot."""
         with self._lock:
-            snapshot = self.get_parameters(imsi)
+            snapshot = self.get_parameters(cpe_key)
             snapshot.values.update(values)
             snapshot.updated = self._clock()
-            self._params[imsi] = asdict(snapshot)
+            self._params[cpe_key] = asdict(snapshot)
             return snapshot
 
-    def get_parameters(self, imsi: str) -> ParameterSnapshot:
-        raw = self._params.get(imsi)
-        return ParameterSnapshot(**raw) if raw else ParameterSnapshot(imsi)
+    def get_parameters(self, cpe_key: str) -> ParameterSnapshot:
+        raw = self._params.get(cpe_key)
+        return ParameterSnapshot(**raw) if raw else ParameterSnapshot(cpe_key)
 
     def put_model(
-        self, imsi: str, handler: str, model: Dict[str, Any],
+        self, cpe_key: str, handler: str, model: Dict[str, Any],
     ) -> CpeModel:
-        cpe = CpeModel(imsi, handler, model, self._clock())
-        self._models[imsi] = asdict(cpe)
+        cpe = CpeModel(cpe_key, handler, model, self._clock())
+        self._models[cpe_key] = asdict(cpe)
         return cpe
 
-    def get_model(self, imsi: str) -> Optional[CpeModel]:
-        raw = self._models.get(imsi)
+    def get_model(self, cpe_key: str) -> Optional[CpeModel]:
+        raw = self._models.get(cpe_key)
         return CpeModel(**raw) if raw else None
 
     def count_inform(
-        self, imsi: str, window_sec: float = INFORM_WINDOW_SEC,
+        self, cpe_key: str, window_sec: float = INFORM_WINDOW_SEC,
     ) -> InformCount:
         """Count an Inform in fixed windows of window_sec."""
         with self._lock:
             now = self._clock()
-            raw = self._informs.get(imsi)
+            raw = self._informs.get(cpe_key)
             counts = InformCount(**raw) if raw else InformCount(0, 0.0, 0, 0.0)
             if counts.window_end <= now:
                 counts.count, counts.window_end = 0, now + window_sec
             counts.count += 1
             counts.total += 1
             counts.last_inform = now
-            self._informs[imsi] = asdict(counts)
+            self._informs[cpe_key] = asdict(counts)
             return counts
 
-    def get_inform_count(self, imsi: str) -> Optional[InformCount]:
-        raw = self._informs.get(imsi)
+    def get_inform_count(self, cpe_key: str) -> Optional[InformCount]:
+        raw = self._informs.get(cpe_key)
         return InformCount(**raw) if raw else None
 
     # Internals
@@ -387,11 +392,11 @@ class AcsStore:
     def _all_tasks(self) -> List[Task]:
         return [Task(**raw) for raw in self._tasks.values()]
 
-    def _release_tasks(self, imsi: str, session_ids, reason: str) -> int:
+    def _release_tasks(self, cpe_key: str, session_ids, reason: str) -> int:
         """Treat tasks left in progress by the sessions as a retryable
         fault, as the Go storage does for orphaned tasks."""
         released = 0
-        for task in self.list_tasks(imsi):
+        for task in self.list_tasks(cpe_key):
             if task.status == TASK_IN_PROGRESS and task.session_id in session_ids:
                 self._requeue_orphan(task, reason)
                 released += 1

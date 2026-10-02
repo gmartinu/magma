@@ -175,8 +175,8 @@ class MainWiringTest(unittest.TestCase):
         redis = fakeredis.FakeStrictRedis()
         left = AcsStore(redis)
         task = tasks.enqueue_task(left, 'IMSI001010000000001', tasks.REBOOT)
-        left.put_session(Session('s1', task.imsi, '10.0.0.9'))
-        self.assertEqual(left.claim_next_task(task.imsi, 's1').status, TASK_IN_PROGRESS)
+        left.put_session(Session('s1', task.cpe_key, '10.0.0.9'))
+        self.assertEqual(left.claim_next_task(task.cpe_key, 's1').status, TASK_IN_PROGRESS)
 
         service = mock.Mock(mconfig=mconfigs_pb2.AcsD())
         config = {'cwmp_auth': {'username': 'cpe', 'password': 'pw'}}

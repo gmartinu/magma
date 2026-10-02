@@ -44,8 +44,8 @@ class StoreTest(unittest.TestCase):
         self.clock = Clock()
         self.store = AcsStore(self.redis, clock=self.clock)
 
-    def _session(self, session_id='s1', ip='10.1.0.5', imsi=IMSI):
-        session = Session(session_id=session_id, imsi=imsi, source_ip=ip)
+    def _session(self, session_id='s1', ip='10.1.0.5', cpe_key=IMSI):
+        session = Session(session_id=session_id, cpe_key=cpe_key, source_ip=ip)
         self.store.put_session(session)
         return session
 
@@ -53,7 +53,7 @@ class StoreTest(unittest.TestCase):
 class SessionTest(StoreTest):
     def test_session_round_trip_and_ttl(self):
         self._session()
-        self.assertEqual(self.store.get_session('10.1.0.5').imsi, IMSI)
+        self.assertEqual(self.store.get_session('10.1.0.5').cpe_key, IMSI)
         self.clock.now += store_mod.SESSION_TIMEOUT_SEC - 1
         self.assertIsNotNone(self.store.get_session('10.1.0.5'))
         self.clock.now += 1
@@ -79,10 +79,10 @@ class SessionTest(StoreTest):
         self.assertIsNone(self.store.get_session('10.1.0.5'))
         self.assertEqual(self.store.end_session('10.1.0.5', 'again'), 0)
 
-    def test_end_imsi_sessions_only_touches_that_cpe(self):
+    def test_end_cpe_sessions_only_touches_that_cpe(self):
         self._session('s1', '10.1.0.5', IMSI)
         self._session('s2', '10.1.0.6', OTHER)
-        self.store.end_imsi_sessions(IMSI, 'new session')
+        self.store.end_cpe_sessions(IMSI, 'new session')
         self.assertIsNone(self.store.get_session('10.1.0.5'))
         self.assertIsNotNone(self.store.get_session('10.1.0.6'))
 
@@ -232,6 +232,6 @@ class ModelTest(StoreTest):
         self.store.put_model(IMSI, 'generic', {'root': 'Device.'})
         cpe = AcsStore(self.redis, clock=self.clock).get_model(IMSI)
         self.assertEqual(
-            (cpe.imsi, cpe.handler, cpe.model, cpe.updated),
+            (cpe.cpe_key, cpe.handler, cpe.model, cpe.updated),
             (IMSI, 'generic', {'root': 'Device.'}, self.clock.now),
         )
