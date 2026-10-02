@@ -33,6 +33,7 @@ require (
 	github.com/labstack/echo/v4 v4.9.0
 	github.com/stretchr/testify v1.7.1
 	google.golang.org/grpc v1.48.0
+	google.golang.org/protobuf v1.28.0
 	magma/lte/cloud/go v0.0.0-00010101000000-000000000000
 	magma/orc8r/cloud/go v0.0.0
 	magma/orc8r/lib/go v0.0.0
@@ -98,7 +99,6 @@ require (
 	golang.org/x/time v0.0.0-20220722155302-e5dcc9cfc0b9 // indirect
 	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/genproto v0.0.0-20211208223120-3a66f561d7aa // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	magma/gateway v0.0.0 // indirect
