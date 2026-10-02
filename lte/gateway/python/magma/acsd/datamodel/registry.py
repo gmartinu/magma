@@ -119,13 +119,26 @@ def normalize_inform(
     handler = registry.select(device_info(inform, params))
     root = detect_root(params) or ROOT_TR181
     model = handler.normalize(root, params)
-    device_id = getattr(inform, 'DeviceId', None)
-    for attr, source in _DEVICE_ID_FIELDS:
-        if getattr(model.identity, attr) is None:
-            setattr(
-                model.identity, attr, getattr(device_id, source, None) or None,
-            )
+    fill_identity(model, device_id_identity(inform))
     return handler, model
+
+
+def device_id_identity(inform) -> Dict[str, str]:
+    """The Model identity fields an Inform DeviceId sets."""
+    device_id = getattr(inform, 'DeviceId', None)
+    identity = {}
+    for attr, source in _DEVICE_ID_FIELDS:
+        value = getattr(device_id, source, None)
+        if value:
+            identity[attr] = value
+    return identity
+
+
+def fill_identity(model: Model, identity: Dict[str, str]) -> None:
+    """Set the identity fields the parameters left unset."""
+    for attr, value in identity.items():
+        if getattr(model.identity, attr, None) is None:
+            setattr(model.identity, attr, value)
 
 
 _DEVICE_ID_FIELDS = (
