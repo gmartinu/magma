@@ -1,0 +1,80 @@
+/*
+Copyright 2026 The Magma Authors.
+
+This source code is licensed under the BSD-style license found in the
+LICENSE file in the root directory of this source tree.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+syntax = "proto3";
+
+package magma.orc8r.entitlements;
+option go_package = "magma/orc8r/cloud/go/services/entitlements/protos";
+
+// Entitlement of one tenant (NMS organization) to one licensed feature.
+message Entitlement {
+    string feature = 1;
+    bool enabled = 2;
+    // Expiry in Unix seconds; 0 means no expiry.
+    int64 not_after = 3;
+    // Days past not_after during which nothing changes.
+    int32 grace_days = 4;
+    // "manual" or "license".
+    string source = 5;
+    string license_id = 6;
+    // Last change in Unix seconds, set by the service.
+    int64 updated_at = 7;
+}
+
+message TenantRequest {
+    int64 tenant_id = 1;
+}
+
+message EntitlementList {
+    repeated Entitlement entitlements = 1;
+}
+
+message GetEntitlementRequest {
+    int64 tenant_id = 1;
+    string feature = 2;
+}
+
+message SetEntitlementsRequest {
+    int64 tenant_id = 1;
+    repeated Entitlement entitlements = 2;
+    // Remove the tenant's entitlements not in the list.
+    bool replace = 3;
+}
+
+message NetworkRequest {
+    string network_id = 1;
+}
+
+message NetworkEntitlements {
+    string network_id = 1;
+    // False when no tenant lists the network.
+    bool has_tenant = 2;
+    int64 tenant_id = 3;
+    // Whether this Orc8r enforces entitlements; when false every feature
+    // behaves as entitled.
+    bool enforce = 4;
+    // When enforcing, whether a network with no tenant counts as entitled.
+    bool allow_untenanted = 5;
+    repeated Entitlement entitlements = 6;
+}
+
+message Void {}
+
+service Entitlements {
+    rpc ListEntitlements (TenantRequest) returns (EntitlementList) {}
+    // NotFound when the tenant has no entitlement to the feature.
+    rpc GetEntitlement (GetEntitlementRequest) returns (Entitlement) {}
+    rpc SetEntitlements (SetEntitlementsRequest) returns (Void) {}
+    rpc DeleteEntitlement (GetEntitlementRequest) returns (Void) {}
+    // The entitlements of the tenant that lists the network.
+    rpc GetNetworkEntitlements (NetworkRequest) returns (NetworkEntitlements) {}
+}
