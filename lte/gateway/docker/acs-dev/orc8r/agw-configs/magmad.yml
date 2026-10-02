@@ -1,0 +1,30 @@
+---
+# Dev override for magmad in the e2e env: only the services this env runs,
+# no systemd, no upgrader or host checks. Top-level keys replace the
+# stock lte/gateway/configs/magmad.yml.
+# control_proxy is left out on purpose: magmad restarts it after a new
+# gateway cert through the init system, which this env does not have. The
+# control_proxy container reloads itself instead (docker-compose.orc8r.yaml).
+magma_services:
+  - mobilityd
+  - acsd
+non_service303_services: []
+# The stock links (mme, pipelined, ...) name services this env lacks.
+linked_services: []
+# No init system the container can drive: restarts on an mconfig change
+# fail and are logged; acsd keeps its static dev mconfig.
+init_system: docker
+enable_upgrade_manager: False
+enable_network_monitor: False
+enable_kernel_version_checking: False
+metricsd:
+  log_level: INFO
+  collect_interval: 30
+  sync_interval: 30
+  grpc_timeout: 30
+  max_grpc_msg_size_mb: 4
+  post_processing_fn: magma.magmad.metrics_collector.do_nothing_metrics_postprocessor
+  services:
+    - magmad
+    - mobilityd
+    - acsd

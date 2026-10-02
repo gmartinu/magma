@@ -1,0 +1,100 @@
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Override on top of docker-compose.yaml: adds magmad and control_proxy,
+# checked in to the local Orc8r of orc8r/docker-compose.yaml, so acsd's
+# cpe_acs state reaches Orc8r and the Orc8r acs REST relays to acsd over
+# SyncRPC. Usage (see README.md):
+#   docker compose -f docker-compose.yaml -f docker-compose.orc8r.yaml up -d
+# orc8r/setup.sh writes the gateway identity into orc8r/.agw first.
+
+x-agw: &agw
+  image: ${AGW_PYTHON_IMAGE:-linuxfoundation.jfrog.io/magma-docker/agw_gateway_python_arm:1.8.0}
+  environment:
+    MAGMA_DEV_MODE: "1"
+    PYTHONPATH: /opt/acs-dev-deps
+  volumes:
+    - ../../../..:/magma:ro
+    - ../../configs:/etc/magma:ro
+    - ../../../../orc8r/gateway/configs/templates:/etc/magma/templates:ro
+    - agw-configs:/var/opt/magma/configs
+    - ./.gen:/build/gen:ro
+    - ./.deps:/opt/acs-dev-deps:ro
+    - magma-tmp:/var/opt/magma/tmp
+    # Gateway identity (challenge key, snowflake) from orc8r/setup.sh, and
+    # the gateway cert magmad bootstraps.
+    - ./orc8r/.agw/certs:/var/opt/magma/certs
+    - ./orc8r/.agw/snowflake:/etc/snowflake
+  network_mode: service:redis
+  cpus: 0.5
+  mem_limit: 384m
+  restart: "no"
+
+services:
+  # One-shot: a writable /var/opt/magma/configs for magmad, so the mconfig
+  # it streams from Orc8r lands somewhere: the dev configs plus the e2e
+  # overrides (magmad.yml, control_proxy.yml). acsd and mobilityd keep the
+  # read-only dev configs.
+  agwconfigs:
+    <<: *agw
+    network_mode: none
+    volumes:
+      - ./configs:/src/dev:ro
+      - ./orc8r/agw-configs:/src/e2e:ro
+      - agw-configs:/out
+    entrypoint: ["/bin/bash", "-c", "cp -a /src/dev/. /src/e2e/. /out/"]
+
+  magmad:
+    <<: *agw
+    depends_on:
+      agwconfigs:
+        condition: service_completed_successfully
+      acsd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50052"]
+      interval: 4s
+      retries: 10
+    command: python3 -m magma.magmad.main
+
+  # nghttpx needs the gateway cert magmad bootstraps, so it waits for it,
+  # and reloads (SIGHUP) when magmad bootstraps a new one: with no init
+  # system here magmad cannot restart it.
+  control_proxy:
+    <<: *agw
+    depends_on:
+      agwconfigs:
+        condition: service_completed_successfully
+    command:
+      - /bin/bash
+      - -c
+      - |
+        cert=/var/opt/magma/certs/gateway.crt
+        conf() {
+          /usr/local/bin/generate_nghttpx_config.py &&
+          sed -i 's/errorlog-syslog=yes/errorlog-syslog=no/' /var/opt/magma/tmp/nghttpx.conf
+        }
+        until test -s $$cert; do sleep 2; done
+        conf
+        nghttpx --conf /var/opt/magma/tmp/nghttpx.conf \
+          /var/opt/magma/certs/controller.key /var/opt/magma/certs/controller.crt &
+        pid=$$!
+        seen=$$(stat -c %Y $$cert)
+        while kill -0 $$pid 2>/dev/null; do
+          sleep 5
+          now=$$(stat -c %Y $$cert 2>/dev/null || echo $$seen)
+          if [ "$$now" != "$$seen" ]; then
+            seen=$$now; echo "gateway cert changed, reloading nghttpx"; conf && kill -HUP $$pid
+          fi
+        done
+
+volumes:
+  agw-configs:

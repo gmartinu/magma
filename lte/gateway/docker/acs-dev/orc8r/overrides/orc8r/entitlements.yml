@@ -1,0 +1,4 @@
+---
+# Dev override of orc8r/cloud/configs/entitlements.yml. Flip enforce, then
+# `docker compose exec controller supervisorctl restart entitlements`.
+enforce: false
