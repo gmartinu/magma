@@ -21,7 +21,14 @@ from magma.pipelined.openflow import flows
 from magma.pipelined.openflow.magma_match import MagmaMatch
 from magma.pipelined.openflow.registers import Direction
 from ryu.lib.packet import ether_types
-from ryu.lib.packet.in_proto import IPPROTO_ICMP, IPPROTO_ICMPV6
+from ryu.lib.packet.in_proto import IPPROTO_ICMP, IPPROTO_ICMPV6, IPPROTO_TCP
+
+# TCP flag bits, as matched by the OVS tcp_flags field.
+_TCP_SYN = 0x002
+_TCP_ACK = 0x010
+
+# IANA-registered CWMP port; TR-069 CPEs listen here for ConnectionRequests.
+DEFAULT_ACS_CONNECTION_REQUEST_PORT = 7547
 
 
 class _IpVersion(Enum):
@@ -49,6 +56,7 @@ class AccessControlController(MagmaController):
         [
             'setup_type', 'ip_blocklist', 'allowed_gre_peers',
             'block_agw_local_ips', 'mtr_interface',
+            'acs_port', 'acs_connection_request_port',
         ],
     )
 
@@ -65,13 +73,36 @@ class AccessControlController(MagmaController):
     def _get_config(self, config_dict, mconfig):
         block_agw_local_ips = config_dict['access_control'].get('block_agw_local_ips', True)
         mtr_interface = config_dict.get('mtr_interface', None)
+        acs_port = self._get_tcp_port(
+            config_dict['access_control'], 'acs_port', None,
+        )
+        acs_cr_port = None
+        if acs_port is not None:
+            acs_cr_port = self._get_tcp_port(
+                config_dict['access_control'], 'acs_connection_request_port',
+                DEFAULT_ACS_CONNECTION_REQUEST_PORT,
+            )
         return self.AccessControlConfig(
             setup_type=config_dict['setup_type'],
             ip_blocklist=config_dict['access_control']['ip_blocklist'],
             allowed_gre_peers=mconfig.allowed_gre_peers,
             block_agw_local_ips=block_agw_local_ips,
             mtr_interface=mtr_interface,
+            acs_port=acs_port,
+            acs_connection_request_port=acs_cr_port,
         )
+
+    def _get_tcp_port(self, access_control_config, key, default):
+        value = access_control_config.get(key)
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) \
+                or not 0 < value < 65536:
+            self.logger.error(
+                'Invalid access_control.%s: %r, ignoring it', key, value,
+            )
+            return default
+        return value
 
     def initialize_on_connect(self, datapath):
         """
@@ -189,6 +220,8 @@ class AccessControlController(MagmaController):
             # Add flow to allow ICMP for monitoring flows.
             if iface == self.config.mtr_interface:
                 self._install_local_icmp_flows(datapath, ip_network, ip_version)
+                if ip_version == _IpVersion.IPV4:
+                    self._install_acs_flows(datapath, ip_network)
 
     @staticmethod
     def _get_interface_ip_addresses(ip_version, iface):
@@ -235,6 +268,65 @@ class AccessControlController(MagmaController):
             priority=flows.MEDIUM_PRIORITY,
             resubmit_table=self.next_table,
         )
+
+    def _install_acs_flows(self, datapath, ip_network):
+        """
+        Let UEs (TR-069 CPEs) reach acsd on the mtr interface over TCP.
+
+        Only installed when access_control.acs_port is set. Allows, uplink:
+          - any TCP segment to <mtr ip>:acs_port (CPE -> ACS sessions)
+          - TCP segments from the CPE's ConnectionRequest port to <mtr ip>,
+            except a bare SYN, so CPEs can answer a ConnectionRequest that
+            acsd opens but cannot open new connections to other mtr ports.
+        Downlink from the mtr interface to the UE is already forwarded by
+        the classifier tunnel flows.
+        """
+        if self.config.acs_port is None:
+            return
+        for match in AccessControlController._create_magma_match_acs_flows(
+            ip_network, self.config.acs_port,
+            self.config.acs_connection_request_port,
+        ):
+            flows.add_resubmit_next_service_flow(
+                datapath, self.tbl_num,
+                match, [],
+                priority=flows.MEDIUM_PRIORITY,
+                resubmit_table=self.next_table,
+            )
+
+    @staticmethod
+    def _create_magma_match_acs_flows(ip_network, acs_port, cr_port):
+        ipv4_dst = (ip_network.network_address, ip_network.netmask)
+        matches = [
+            MagmaMatch(
+                direction=Direction.OUT,
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_dst=ipv4_dst,
+                ip_proto=IPPROTO_TCP,
+                tcp_dst=acs_port,
+            ),
+        ]
+        if cr_port is None:
+            return matches
+        # SYN-ACK answering acsd's SYN, then any segment without SYN.
+        # tcp_flags, not tcp_flags_nxm: ryu sorts match fields by OXM
+        # type, so the Nicira field would land before eth_type/ip_proto
+        # and OVS rejects the flow with OFPBMC_BAD_PREREQ.
+        for flags, mask in (
+            (_TCP_SYN | _TCP_ACK, _TCP_SYN | _TCP_ACK),
+            (0, _TCP_SYN),
+        ):
+            matches.append(
+                MagmaMatch(
+                    direction=Direction.OUT,
+                    eth_type=ether_types.ETH_TYPE_IP,
+                    ipv4_dst=ipv4_dst,
+                    ip_proto=IPPROTO_TCP,
+                    tcp_src=cr_port,
+                    tcp_flags=(flags, mask),
+                ),
+            )
+        return matches
 
     @staticmethod
     def _create_magma_match_icmp_flow(ip_version, ip_network):
