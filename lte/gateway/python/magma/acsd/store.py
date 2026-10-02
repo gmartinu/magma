@@ -139,6 +139,7 @@ class SessionOutcome:
     tasks_done: int = 0
     tasks_failed: int = 0
     faults: int = 0
+    mode: str = 'core'
 
 
 class StoreListener:
@@ -478,6 +479,7 @@ class AcsStore:
             tasks_done=session.tasks_done,
             tasks_failed=session.tasks_failed,
             faults=session.faults,
+            mode=session.mode,
         )
         self._outcomes[session.cpe_key] = asdict(outcome)
         self._listener.session_ended(outcome)
