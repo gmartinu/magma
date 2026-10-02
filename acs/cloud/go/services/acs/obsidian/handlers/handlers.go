@@ -61,8 +61,8 @@ func (h *Handlers) GetHandlers() []obsidian.Handler {
 }
 
 // requireFeature is the one gate every acs route passes; the entitlement
-// check (Stage 4) goes here.
-func requireFeature(c echo.Context) error {
+// check (Stage 4) goes here. A var so tests can prove every route uses it.
+var requireFeature = func(c echo.Context) error {
 	return nil
 }
 
