@@ -51,6 +51,8 @@ var (
 		state.NewStateSerde(lte.SPGWStateType, &state.ArbitraryJSON{}),
 		state.NewStateSerde(lte.SubscriberStateType, &state.ArbitraryJSON{}),
 		state.NewStateSerde(lte.GatewaySubscriberStateType, &subscriberdb_storage.GatewaySubscriberState{}),
+		// Typed by the acs module, which owns its REST shape
+		state.NewStateSerde(lte.CPEAcsStateType, &state.ArbitraryJSON{}),
 	))
 	// Device contains the full set of device serdes used in the LTE module
 	Device = serdes.Device

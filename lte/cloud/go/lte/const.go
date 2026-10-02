@@ -88,6 +88,7 @@ const (
 	// EnodebStateType etc. denote types of state replicated from AGWs.
 	EnodebStateType            = "single_enodeb"
 	ICMPStateType              = "icmp_monitoring"
+	CPEAcsStateType            = "cpe_acs"
 	MMEStateType               = "MME"
 	MobilitydStateType         = "mobilityd_ipdesc_record"
 	S1APStateType              = "S1AP"
