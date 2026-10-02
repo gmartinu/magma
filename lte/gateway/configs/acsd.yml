@@ -48,3 +48,11 @@ cwmp_wan:
   port: 48443
   cert_path: /var/opt/magma/certs/acsd_wan.crt
   key_path: /var/opt/magma/certs/acsd_wan.key
+
+# Per-CPE radio KPIs (acs_rsrp_dbm, acs_rsrq_db, acs_sinr_db), labelled by
+# cpe_key, for the online CPEs. Each CPE adds three series that metricsd
+# pushes to Orc8r, so past max_cpes the rest are left out
+# (acs_cpe_kpis_dropped counts them).
+cpe_kpis:
+  enabled: true
+  max_cpes: 200

@@ -55,6 +55,16 @@ HTTP_403 = '403 Forbidden'
 REAP_INTERVAL_SEC = 30.0
 
 
+class SessionObserver:
+    """Told of Informs and CPE Faults, for metrics. Must not block."""
+
+    def inform(self, accepted: bool) -> None:
+        pass
+
+    def fault(self, code: int) -> None:
+        pass
+
+
 def accept_all(source_ip: str, inform: models.Inform) -> Optional[str]:
     """Default identity check: every CPE is accepted, keyed by its IP."""
     return source_ip
@@ -101,6 +111,7 @@ class CwmpSessionHandler:
         registry: Registry = DEFAULT_REGISTRY,
         clock: Callable[[], float] = time.monotonic,
         claimed=None,
+        observer: Optional[SessionObserver] = None,
     ):
         """
         `claimed` (a claimed.ClaimedMode) serves the requests of a claimed
@@ -108,6 +119,7 @@ class CwmpSessionHandler:
         """
         self._identify = identify
         self._claimed = claimed
+        self._observer = observer or SessionObserver()
         self._store = store
         self._registry = registry
         self._clock = clock
@@ -166,6 +178,7 @@ class CwmpSessionHandler:
             )
         else:
             identity = self._identify(source_ip, inform)
+        self._observer.inform(bool(identity))
         if not identity:
             self._store.end_session(key, 'session refused')
             logging.warning(
@@ -220,6 +233,7 @@ class CwmpSessionHandler:
         elif isinstance(message, models.Fault):
             session.faults += 1
             code = int(message.FaultCode or 0)
+            self._observer.fault(code)
             fault = (code, tasks.fault_text(message), tasks.retryable(code))
         elif type(message).__name__ != method + 'Response':
             fault = (
