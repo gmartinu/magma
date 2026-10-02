@@ -204,9 +204,10 @@ def main():
     auth = get_cwmp_auth(config)
     wan = get_cwmp_wan(config, auth)
     claimed = make_claimed_mode(wan, store, client)
+    frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
     handler = CwmpSessionHandler(
         identify=SessionIdentifier(), store=store, claimed=claimed,
-        observer=metrics,
+        observer=metrics, frozen=frozen,
     )
     cwmp = make_cwmp_wsgi(handler)
     start_cwmp_listener(
@@ -221,7 +222,7 @@ def main():
     )
 
     service.register_operational_states_callback(views.operational_states)
-    CpeManagerRpcServicer(handler.store, views).add_to_server(service.rpc_server)
+    CpeManagerRpcServicer(handler.store, views, frozen).add_to_server(service.rpc_server)
     schedule_reaper(
         service.loop, store,
         then=lambda: metrics.refresh(views.list(STATE_MAX_AGE_SEC), store.task_counts()),

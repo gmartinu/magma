@@ -231,7 +231,9 @@ class MainServesCpeManagerTest(unittest.TestCase):
                 mock.patch.object(main, 'CpeManagerRpcServicer') as servicer:
             main.main()
         handler = listen.call_args.args[1]
-        store, views = servicer.call_args.args
+        store, views, frozen = servicer.call_args.args
+        self.assertFalse(frozen)
+        self.assertFalse(handler.frozen)
         self.assertIs(store, handler.store)
         self.assertIs(views._store, handler.store)
         servicer.return_value.add_to_server.assert_called_once_with(service.rpc_server)
