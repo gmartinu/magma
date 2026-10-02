@@ -21,7 +21,7 @@ import fakeredis
 import yaml
 from google.protobuf import json_format
 from lte.protos.mconfig import mconfigs_pb2
-from magma.acsd import main
+from magma.acsd import main, tasks
 from magma.acsd.config import (
     AUTH_OFF,
     AUTH_REQUIRED,
@@ -33,8 +33,11 @@ from magma.acsd.config import (
     get_cwmp_bind,
     get_cwmp_workers,
 )
+from magma.acsd.datamodel import DEFAULT_REGISTRY
+from magma.acsd.digest import DigestAuthenticator
+from magma.acsd.identity import SessionIdentifier
 from magma.acsd.session import CwmpSessionHandler
-from magma.acsd.store import AcsStore
+from magma.acsd.store import TASK_IN_PROGRESS, TASK_PENDING, AcsStore, Session
 
 
 def memory_store():
@@ -165,6 +168,36 @@ class CwmpListenerWiringTest(unittest.TestCase):
                 CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(store=memory_store()), 1,
             ).join(5)
         interrupt.assert_called_once_with()
+
+
+class MainWiringTest(unittest.TestCase):
+    def test_main_wires_store_identity_registry_and_digest(self):
+        redis = fakeredis.FakeStrictRedis()
+        left = AcsStore(redis)
+        task = tasks.enqueue_task(left, 'IMSI001010000000001', tasks.REBOOT)
+        left.put_session(Session('s1', task.imsi, '10.0.0.9'))
+        self.assertEqual(left.claim_next_task(task.imsi, 's1').status, TASK_IN_PROGRESS)
+
+        service = mock.Mock(mconfig=mconfigs_pb2.AcsD())
+        config = {'cwmp_auth': {'username': 'cpe', 'password': 'pw'}}
+        with mock.patch.object(main, 'MagmaService', return_value=service), \
+                mock.patch.object(main, 'sentry_init'), \
+                mock.patch.object(main, 'load_service_config', return_value=config), \
+                mock.patch.object(main, 'get_default_client', return_value=redis), \
+                mock.patch.object(main, 'start_cwmp_listener') as listen:
+            main.main()
+
+        bind, handler, workers, authenticator = listen.call_args.args
+        self.assertEqual((bind.port, workers), (DEFAULT_CWMP_PORT, DEFAULT_CWMP_WORKERS))
+        self.assertIsInstance(handler._identify, SessionIdentifier)
+        self.assertIs(handler._registry, DEFAULT_REGISTRY)
+        # The handler's store is the Redis one, which the start cleaned up.
+        self.assertEqual(handler.store.get_task(task.task_id).status, TASK_PENDING)
+        self.assertEqual(handler.store.list_sessions(), [])
+        self.assertIsInstance(authenticator, DigestAuthenticator)
+        self.assertEqual(authenticator.realm, 'magma-acs')
+        service.run.assert_called_once_with()
+        service.close.assert_called_once_with()
 
 
 class SkeletonTest(unittest.TestCase):
