@@ -33,14 +33,18 @@ import (
 	"magma/orc8r/cloud/go/services/configurator"
 	configurator_test_init "magma/orc8r/cloud/go/services/configurator/test_init"
 	device_test_init "magma/orc8r/cloud/go/services/device/test_init"
+	entitlements_servicers "magma/orc8r/cloud/go/services/entitlements/servicers/protected"
+	entitlements_test_init "magma/orc8r/cloud/go/services/entitlements/test_init"
 	"magma/orc8r/cloud/go/services/obsidian"
 	state_test_init "magma/orc8r/cloud/go/services/state/test_init"
 	state_test_utils "magma/orc8r/cloud/go/services/state/test_utils"
 )
 
-// setupNetwork starts the services the handlers read and registers g1/hw1
-// and g2/hw2 in n1, so both gateways can report state.
+// setupNetwork starts the services the handlers read, with entitlements
+// not enforced, and registers g1/hw1 and g2/hw2 in n1, so both gateways
+// can report state.
 func setupNetwork(t *testing.T) {
+	entitlements_test_init.StartTestService(t, entitlements_servicers.Config{Enforce: false}, nil)
 	configurator_test_init.StartTestService(t)
 	device_test_init.StartTestService(t)
 	state_test_init.StartTestService(t)

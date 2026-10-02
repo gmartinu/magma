@@ -29,6 +29,8 @@ import (
 	"magma/lte/cloud/go/lte"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
+	"magma/orc8r/cloud/go/services/entitlements"
+	"magma/orc8r/cloud/go/services/entitlements/obsidian/guard"
 	"magma/orc8r/cloud/go/services/obsidian"
 	"magma/orc8r/cloud/go/services/state"
 	state_types "magma/orc8r/cloud/go/services/state/types"
@@ -61,10 +63,11 @@ func (h *Handlers) GetHandlers() []obsidian.Handler {
 	}, h.relayHandlers()...))
 }
 
-// requireFeature is the one gate every acs route passes; the entitlement
-// check (Stage 4) goes here. A var so tests can prove every route uses it.
+// requireFeature is the one gate every acs route passes: the network must
+// be entitled to acs (a pass when the deployment does not enforce). A var
+// so tests can prove every route uses it.
 var requireFeature = func(c echo.Context) error {
-	return nil
+	return guard.CheckEntitlement(c, entitlements.FeatureACS)
 }
 
 func guardAll(hs []obsidian.Handler) []obsidian.Handler {
