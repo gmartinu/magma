@@ -46,7 +46,11 @@ py_library(
     deps = [
         ":acsd_identity",
         ":acsd_lib",
+        ":cpe_state",
         ":digest",
+        ":events",
+        ":metrics",
+        ":rpc_servicer",
         ":server",
         ":session",
         ":store",
@@ -131,5 +135,54 @@ py_library(
         "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/tr069:models",
         requirement("spyne"),
+    ],
+)
+
+py_library(
+    name = "cpe_state",
+    srcs = ["cpe_state.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":store",
+        "//orc8r/protos:service303_python_proto",
+    ],
+)
+
+py_library(
+    name = "rpc_servicer",
+    srcs = ["rpc_servicer.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cpe_state",
+        ":store",
+        ":tasks",
+        "//lte/protos:cpe_acs_python_grpc",
+        "//lte/protos:cpe_acs_python_proto",
+        requirement("grpcio"),
+    ],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cpe_state",
+        ":session",
+        ":store",
+        requirement("prometheus_client"),
+    ],
+)
+
+py_library(
+    name = "events",
+    srcs = ["events.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cpe_state",
+        ":store",
+        "//orc8r/gateway/python/magma/eventd:eventd_client",
+        "//orc8r/protos:eventd_python_grpc",
+        requirement("prometheus_client"),
     ],
 )

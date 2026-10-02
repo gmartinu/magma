@@ -241,3 +241,101 @@ pytest_test(
         requirement("fakeredis"),
     ],
 )
+
+pytest_test(
+    name = "test_session_outcome",
+    size = "small",
+    srcs = ["test_session_outcome.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_cpe_state",
+    size = "small",
+    srcs = ["test_cpe_state.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_rpc_servicer",
+    size = "small",
+    srcs = ["test_rpc_servicer.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:rpc_servicer",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/protos:cpe_acs_python_grpc",
+        "//lte/protos:cpe_acs_python_proto",
+        "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
+        requirement("grpcio"),
+    ],
+)
+
+pytest_test(
+    name = "test_metrics",
+    size = "small",
+    srcs = ["test_metrics.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:metrics",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
+        requirement("prometheus_client"),
+        requirement("pyyaml"),
+    ],
+)
+
+pytest_test(
+    name = "test_events",
+    size = "small",
+    srcs = ["test_events.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:events",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/protos:mconfigs_python_proto",
+        requirement("fakeredis"),
+        requirement("prometheus_client"),
+        requirement("pyyaml"),
+    ],
+)
