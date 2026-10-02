@@ -35,3 +35,16 @@ cwmp_auth:
   password: ""
   # How long a Digest nonce is accepted; CPEs retry stale ones transparently.
   nonce_ttl_secs: 300
+
+# Claimed mode: a second CWMP listener, HTTPS on the WAN side, for CPEs
+# outside the Magma core (claimed by OUI/ProductClass/serial with
+# acsd_cli.py). No IMSI lookup; Digest is always required: the bootstrap
+# credential (cwmp_auth's unless set here) only until acsd rotates the CPE
+# to its own. Off by default; the core listener above is unaffected.
+cwmp_wan:
+  enabled: false
+  interface: eth0
+  address: 0.0.0.0
+  port: 48443
+  cert_path: /var/opt/magma/certs/acsd_wan.crt
+  key_path: /var/opt/magma/certs/acsd_wan.key
