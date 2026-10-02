@@ -1,0 +1,169 @@
+/*
+Copyright 2026 The Magma Authors.
+
+This source code is licensed under the BSD-style license found in the
+LICENSE file in the root directory of this source tree.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+syntax = "proto3";
+
+import "google/protobuf/struct.proto";
+
+package magma.lte;
+
+option go_package = "magma/lte/cloud/go/protos";
+
+// CpeManager is acsd's API for the CPEs it manages over TR-069 (CWMP).
+// Orc8r reaches it over SyncRPC. Every CPE is named by an opaque cpe_key:
+// "IMSI<digits>" for a CPE on the Magma core, a claim key otherwise.
+service CpeManager {
+  // Queue a task; it runs in the CPE's next CWMP session.
+  // INVALID_ARGUMENT for a malformed task.
+  rpc EnqueueTask (EnqueueTaskRequest) returns (CpeTask) {}
+  // NOT_FOUND when the task is unknown or was pruned.
+  rpc GetTask (GetTaskRequest) returns (CpeTask) {}
+  // Every CPE acsd has heard from, without the model or tasks.
+  rpc ListCpes (ListCpesRequest) returns (ListCpesResponse) {}
+  // One CPE with its normalized model and tasks. NOT_FOUND when unknown.
+  rpc GetCpe (GetCpeRequest) returns (Cpe) {}
+  // Ask the CPE to open a session now instead of at its next periodic
+  // Inform. UNIMPLEMENTED until acsd sends Connection Requests.
+  rpc ConnectionRequest (ConnectionRequestRequest) returns (ConnectionRequestResponse) {}
+}
+
+enum CpeTaskType {
+  CPE_TASK_TYPE_UNSPECIFIED = 0;
+  CPE_TASK_TYPE_REBOOT = 1;
+  CPE_TASK_TYPE_FACTORY_RESET = 2;
+  // Read the subtrees of the CPE's datamodel handler into the snapshot.
+  CPE_TASK_TYPE_REFRESH = 3;
+  CPE_TASK_TYPE_GET_PARAMETER_VALUES = 4;
+  CPE_TASK_TYPE_SET_PARAMETER_VALUES = 5;
+  CPE_TASK_TYPE_GET_PARAMETER_NAMES = 6;
+}
+
+enum CpeTaskStatus {
+  CPE_TASK_STATUS_UNSPECIFIED = 0;
+  CPE_TASK_STATUS_PENDING = 1;
+  CPE_TASK_STATUS_IN_PROGRESS = 2;
+  CPE_TASK_STATUS_DONE = 3;
+  CPE_TASK_STATUS_FAILED = 4;
+  CPE_TASK_STATUS_EXPIRED = 5;
+}
+
+enum CpeMode {
+  CPE_MODE_UNSPECIFIED = 0;
+  // Keyed by the IMSI behind its source IP on the Magma core.
+  CPE_MODE_CORE = 1;
+  // Keyed by a claim; reaches acsd from outside the core.
+  CPE_MODE_CLAIMED = 2;
+}
+
+message CpeParameterValue {
+  string name = 1;
+  string value = 2;
+  // xsd type; "xsd:string" when empty.
+  string type = 3;
+}
+
+message EnqueueTaskRequest {
+  string cpe_key = 1;
+  CpeTaskType type = 2;
+  // GET_PARAMETER_VALUES
+  repeated string parameter_names = 3;
+  // SET_PARAMETER_VALUES
+  repeated CpeParameterValue parameter_values = 4;
+  // GET_PARAMETER_NAMES
+  string parameter_path = 5;
+  bool next_level = 6;
+  // 0 uses acsd's default.
+  int32 max_attempts = 7;
+  // 0 uses acsd's default; negative means the task never expires.
+  int64 ttl_sec = 8;
+}
+
+message CpeTask {
+  string task_id = 1;
+  string cpe_key = 2;
+  CpeTaskType type = 3;
+  CpeTaskStatus status = 4;
+  // The arguments the task was queued with.
+  google.protobuf.Struct args = 5;
+  int32 attempts = 6;
+  int32 max_attempts = 7;
+  // Of the last fault; a requeue after a dropped session leaves the
+  // reason in fault_string with fault_code 0.
+  int32 fault_code = 8;
+  string fault_string = 9;
+  // What the CPE answered: "values", "names", tolerated "faults".
+  google.protobuf.Struct result = 10;
+  // Unix time in seconds; deadline 0 means none.
+  double created = 11;
+  double updated = 12;
+  double deadline = 13;
+  // Empty unless the CPE is on the core or reported its SIM.
+  string imsi = 14;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message CpeSession {
+  string session_id = 1;
+  // "completed", "timed_out" or "interrupted".
+  string result = 2;
+  string reason = 3;
+  double started = 4;
+  double ended = 5;
+  int32 tasks_done = 6;
+  int32 tasks_failed = 7;
+  int32 faults = 8;
+}
+
+message Cpe {
+  string cpe_key = 1;
+  CpeMode mode = 2;
+  // Empty when unknown (a claimed CPE that did not report its SIM).
+  string imsi = 3;
+  string serial_number = 4;
+  string oui = 5;
+  string product_class = 6;
+  string software_version = 7;
+  // The datamodel handler serving the CPE.
+  string handler = 8;
+  double last_inform = 9;
+  int64 informs_total = 10;
+  bool online = 11;
+  int32 pending_tasks = 12;
+  // Unset until a session of the CPE ends.
+  CpeSession last_session = 13;
+  // GetCpe only: the normalized model, its tasks in run order and, on
+  // request, the raw parameter snapshot.
+  google.protobuf.Struct model = 14;
+  repeated CpeTask tasks = 15;
+  map<string, string> parameters = 16;
+}
+
+message ListCpesRequest {}
+
+message ListCpesResponse {
+  repeated Cpe cpes = 1;
+}
+
+message GetCpeRequest {
+  string cpe_key = 1;
+  bool include_parameters = 2;
+}
+
+message ConnectionRequestRequest {
+  string cpe_key = 1;
+}
+
+message ConnectionRequestResponse {}

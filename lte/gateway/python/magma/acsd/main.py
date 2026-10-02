@@ -12,9 +12,10 @@ limitations under the License.
 """
 
 import _thread
+import asyncio
 import logging
 import threading
-from typing import List, Optional
+from typing import Callable, Optional
 
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.claimed import ClaimedMode
@@ -31,26 +32,48 @@ from magma.acsd.config import (
     get_cwmp_wan,
     get_cwmp_workers,
 )
+from magma.acsd.cpe_state import STATE_MAX_AGE_SEC, CpeViews
 from magma.acsd.credentials import CredentialStore
 from magma.acsd.digest import (
     DigestAuthenticator,
     NonceStore,
     StaticCredentialProvider,
 )
+from magma.acsd.events import AcsEvents, EventEmitter
 from magma.acsd.identity import SessionIdentifier
+from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
+from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
-from magma.acsd.session import CwmpSessionHandler
-from magma.acsd.store import AcsStore
+from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
+from magma.acsd.store import AcsStore, StoreListeners
 from magma.common.redis.client import get_default_client
 from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
 from magma.configuration import load_service_config
-from orc8r.protos.service303_pb2 import State
 
 
-def _get_operational_states() -> List[State]:
-    # `cpe_acs` state is reported once acsd keeps per-CPE state (Stage 2).
-    return []
+def schedule_reaper(
+    loop: asyncio.AbstractEventLoop,
+    store: AcsStore,
+    interval_sec: float = REAP_INTERVAL_SEC,
+    then: Optional[Callable[[], None]] = None,
+) -> None:
+    """
+    Reap on a timer too: the handler only reaps when an Inform arrives, so
+    on a quiet gateway dead sessions would linger in the state and pending
+    tasks would never expire. `then` runs after each reap (the metric
+    gauges refresh).
+    """
+    def reap():
+        try:
+            store.reap_expired()
+            if then:
+                then()
+        except Exception:  # pylint: disable=broad-except
+            logging.exception('acsd maintenance (reap, metrics) failed')
+        finally:
+            loop.call_later(interval_sec, reap)
+    loop.call_soon(reap)
 
 
 def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
@@ -169,7 +192,11 @@ def main():
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
     client = get_default_client()
-    store = AcsStore(client)
+    metrics = AcsMetrics(get_cpe_kpi_config(config))
+    events = AcsEvents(EventEmitter().start())
+    store = AcsStore(client, listener=StoreListeners(metrics, events))
+    views = CpeViews(store, service.mconfig.periodic_inform_interval)
+    events.mode_of = views.mode_of
     # A new process cannot continue the HTTP exchanges of the last one.
     requeued = store.end_all_sessions('acsd restarted')
     if requeued:
@@ -179,6 +206,7 @@ def main():
     claimed = make_claimed_mode(wan, store, client)
     handler = CwmpSessionHandler(
         identify=SessionIdentifier(), store=store, claimed=claimed,
+        observer=metrics,
     )
     cwmp = make_cwmp_wsgi(handler)
     start_cwmp_listener(
@@ -192,8 +220,12 @@ def main():
         bind.interface, bind.address, bind.port, workers,
     )
 
-    # Register a callback function for GetOperationalStates
-    service.register_operational_states_callback(_get_operational_states)
+    service.register_operational_states_callback(views.operational_states)
+    CpeManagerRpcServicer(handler.store, views).add_to_server(service.rpc_server)
+    schedule_reaper(
+        service.loop, store,
+        then=lambda: metrics.refresh(views.list(STATE_MAX_AGE_SEC), store.task_counts()),
+    )
 
     # Run the service loop
     service.run()

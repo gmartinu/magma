@@ -133,6 +133,7 @@ metricsd:
     - pipelined
     - state
     - sessiond
+    - acsd
 #    - kernsnoopd
 
 generic_command_config:

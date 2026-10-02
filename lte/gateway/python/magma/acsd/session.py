@@ -34,7 +34,14 @@ from magma.acsd.datamodel import (
     fill_identity,
 )
 from magma.acsd.digest import DIGEST_USERNAME
-from magma.acsd.store import TASK_IN_PROGRESS, AcsStore, Session, Task
+from magma.acsd.store import (
+    SESSION_COMPLETED,
+    TASK_FAILED,
+    TASK_IN_PROGRESS,
+    AcsStore,
+    Session,
+    Task,
+)
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
@@ -46,6 +53,16 @@ IdentifyFn = Callable[[str, models.Inform], Optional[str]]
 
 HTTP_403 = '403 Forbidden'
 REAP_INTERVAL_SEC = 30.0
+
+
+class SessionObserver:
+    """Told of Informs and CPE Faults, for metrics. Must not block."""
+
+    def inform(self, accepted: bool) -> None:
+        pass
+
+    def fault(self, code: int) -> None:
+        pass
 
 
 def accept_all(source_ip: str, inform: models.Inform) -> Optional[str]:
@@ -94,6 +111,7 @@ class CwmpSessionHandler:
         registry: Registry = DEFAULT_REGISTRY,
         clock: Callable[[], float] = time.monotonic,
         claimed=None,
+        observer: Optional[SessionObserver] = None,
     ):
         """
         `claimed` (a claimed.ClaimedMode) serves the requests of a claimed
@@ -101,6 +119,7 @@ class CwmpSessionHandler:
         """
         self._identify = identify
         self._claimed = claimed
+        self._observer = observer or SessionObserver()
         self._store = store
         self._registry = registry
         self._clock = clock
@@ -159,6 +178,7 @@ class CwmpSessionHandler:
             )
         else:
             identity = self._identify(source_ip, inform)
+        self._observer.inform(bool(identity))
         if not identity:
             self._store.end_session(key, 'session refused')
             logging.warning(
@@ -211,7 +231,9 @@ class CwmpSessionHandler:
                 True,
             )
         elif isinstance(message, models.Fault):
+            session.faults += 1
             code = int(message.FaultCode or 0)
+            self._observer.fault(code)
             fault = (code, tasks.fault_text(message), tasks.retryable(code))
         elif type(message).__name__ != method + 'Response':
             fault = (
@@ -246,7 +268,7 @@ class CwmpSessionHandler:
         """Send the next request of the session, or end it."""
         request = self._next_request(session)
         if request is None:
-            self._store.end_session(session.key, 'session ended')
+            self._store.close_session(session, SESSION_COMPLETED, 'session ended')
             logging.info('Session of %s done', session.cpe_key)
             return models.DummyInput()
         session.pending_method = type(request).__name__
@@ -271,6 +293,7 @@ class CwmpSessionHandler:
                 self._store.fail_task(
                     task.task_id, tasks.FAULT_INVALID_ARGUMENTS, str(err), False,
                 )
+                session.tasks_failed += 1
                 self._task_failed(session, task)
                 continue
             if not plan:
@@ -310,6 +333,7 @@ class CwmpSessionHandler:
             self._store.merge_parameters(session.cpe_key, result['values'])
             self._update_model(session)
         self._store.complete_task(task.task_id, result)
+        session.tasks_done += 1
         logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.cpe_key)
         if session.mode == MODE_CLAIMED:
             self._claimed.task_finished(task)
@@ -319,6 +343,8 @@ class CwmpSessionHandler:
     ) -> None:
         self._clear_task(session)
         failed = self._store.fail_task(task.task_id, code, text, retry)
+        if failed.status == TASK_FAILED:
+            session.tasks_failed += 1
         logging.warning(
             'Task %s (%s) on %s fault %d: %s; now %s',
             task.task_id, task.type, session.cpe_key, code, text, failed.status,

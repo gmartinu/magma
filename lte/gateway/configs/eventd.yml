@@ -63,3 +63,9 @@ event_registry:
   attach_reject:
     module: lte
     filename: mme_events.v1.yml
+  cpe_session_completed:
+    module: lte
+    filename: cpe_acs_events.v1.yml
+  cpe_task_failed:
+    module: lte
+    filename: cpe_acs_events.v1.yml
