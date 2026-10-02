@@ -113,3 +113,17 @@ pytest_test(
         requirement("grpcio"),
     ],
 )
+
+pytest_test(
+    name = "test_store",
+    size = "small",
+    srcs = ["test_store.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
+    ],
+)
