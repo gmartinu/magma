@@ -11,6 +11,7 @@
  * limitations under the License.
  */
 import AcsClaims from './AcsClaims';
+import AcsCpeDetail from './AcsCpeDetail';
 import AcsCpeList from './AcsCpeList';
 import InboxIcon from '@mui/icons-material/Inbox';
 import React from 'react';
@@ -43,6 +44,7 @@ function AcsOverview() {
 export default function AcsDashboard() {
   return (
     <Routes>
+      <Route path="/cpe/:cpeKey/*" element={<AcsCpeDetail />} />
       <Route path="/overview/*" element={<AcsOverview />} />
       <Route index element={<Navigate to="overview" replace />} />
     </Routes>
