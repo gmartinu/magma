@@ -9,11 +9,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM nginx:1.23
+# 1.23 is Debian bullseye, whose security suite left deb.debian.org; on
+# bookworm PyYAML and jinja2 come from apt (pip refuses system installs).
+FROM nginx:1.27
 
 RUN apt-get update && \
-  apt-get install -y python3-pip daemontools
-RUN pip3 install --no-cache-dir PyYAML jinja2
+  apt-get install -y --no-install-recommends python3 python3-yaml python3-jinja2 daemontools && \
+  rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/opt/magma/envdir
 COPY configs /etc/magma/configs
