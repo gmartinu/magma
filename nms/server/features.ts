@@ -194,6 +194,11 @@ export const arrayConfigs: Array<FeatureConfig> = [
     rules: [AlwaysEnabledInTestEnvRule],
   },
   {
+    id: 'acs',
+    title: 'ACS (TR-069 CPE management)',
+    enabledByDefault: false,
+  },
+  {
     id: 'user_management_dev',
     title: 'User Management - Dev mode',
     enabledByDefault: false,
