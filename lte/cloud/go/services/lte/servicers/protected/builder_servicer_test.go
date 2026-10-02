@@ -204,6 +204,9 @@ func TestBuilder_Build(t *testing.T) {
 		"sctpd": &lte_mconfig.SctpD{
 			LogLevel: protos.LogLevel_INFO,
 		},
+		"acsd": &lte_mconfig.AcsD{
+			LogLevel: protos.LogLevel_INFO,
+		},
 	}
 
 	// Happy path
@@ -420,6 +423,9 @@ func TestBuilder_Build_NonNat(t *testing.T) {
 			LogLevel: protos.LogLevel_INFO,
 		},
 		"sctpd": &lte_mconfig.SctpD{
+			LogLevel: protos.LogLevel_INFO,
+		},
+		"acsd": &lte_mconfig.AcsD{
 			LogLevel: protos.LogLevel_INFO,
 		},
 	}
@@ -771,6 +777,9 @@ func TestBuilder_Build_NgcConfig(t *testing.T) {
 		"sctpd": &lte_mconfig.SctpD{
 			LogLevel: protos.LogLevel_INFO,
 		},
+		"acsd": &lte_mconfig.AcsD{
+			LogLevel: protos.LogLevel_INFO,
+		},
 	}
 
 	actual, err := buildNonFederated(&nw, &graph, "gw1")
@@ -907,6 +916,9 @@ func TestBuilder_Build_BaseCase(t *testing.T) {
 			LogLevel: protos.LogLevel_INFO,
 		},
 		"sctpd": &lte_mconfig.SctpD{
+			LogLevel: protos.LogLevel_INFO,
+		},
+		"acsd": &lte_mconfig.AcsD{
 			LogLevel: protos.LogLevel_INFO,
 		},
 	}
@@ -1144,6 +1156,9 @@ func TestBuilder_Build_FederatedBaseCase(t *testing.T) {
 		"sctpd": &lte_mconfig.SctpD{
 			LogLevel: protos.LogLevel_INFO,
 		},
+		"acsd": &lte_mconfig.AcsD{
+			LogLevel: protos.LogLevel_INFO,
+		},
 	}
 
 	// Use LTE FEG NETWORK parser for this case
@@ -1296,6 +1311,9 @@ func TestBuilder_BuildInheritedProperties(t *testing.T) {
 		"sctpd": &lte_mconfig.SctpD{
 			LogLevel: protos.LogLevel_INFO,
 		},
+		"acsd": &lte_mconfig.AcsD{
+			LogLevel: protos.LogLevel_INFO,
+		},
 	}
 
 	actual, err := buildNonFederated(&nw, &graph, "gw1")
@@ -1431,6 +1449,9 @@ func TestBuilder_BuildUnmanagedEnbConfig(t *testing.T) {
 			LogLevel: protos.LogLevel_INFO,
 		},
 		"sctpd": &lte_mconfig.SctpD{
+			LogLevel: protos.LogLevel_INFO,
+		},
+		"acsd": &lte_mconfig.AcsD{
 			LogLevel: protos.LogLevel_INFO,
 		},
 	}
@@ -1576,6 +1597,9 @@ func TestBuilder_BuildCongestionControlConfig(t *testing.T) {
 		"sctpd": &lte_mconfig.SctpD{
 			LogLevel: protos.LogLevel_INFO,
 		},
+		"acsd": &lte_mconfig.AcsD{
+			LogLevel: protos.LogLevel_INFO,
+		},
 	}
 
 	actual, err := buildNonFederated(&nw, &graph, "gw1")
@@ -1712,6 +1736,9 @@ func TestBuilder_Build_MMEPool(t *testing.T) {
 			LogLevel: protos.LogLevel_INFO,
 		},
 		"sctpd": &lte_mconfig.SctpD{
+			LogLevel: protos.LogLevel_INFO,
+		},
+		"acsd": &lte_mconfig.AcsD{
 			LogLevel: protos.LogLevel_INFO,
 		},
 	}
