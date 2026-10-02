@@ -176,6 +176,20 @@ services:
       orc8r.io/obsidian_handlers_path_prefixes: >
         /magma/v1/networks/:network_id/tracing,
 
+  entitlements:
+    host: "localhost"
+    port: 9126
+    protected_port: 9226
+    echo_port: 10126
+    proxy_type: "clientcert"
+    labels:
+      orc8r.io/obsidian_handlers: "true"
+      orc8r.io/swagger_spec: "true"
+    annotations:
+      orc8r.io/obsidian_handlers_path_prefixes: >
+        /magma/v1/tenants/:tenant_id/entitlements,
+        /magma/v1/networks/:network_id/entitlements,
+
   tenants:
     host: "localhost"
     port: 9110
