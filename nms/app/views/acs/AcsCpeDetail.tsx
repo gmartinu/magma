@@ -13,6 +13,9 @@
 import AcsAPI, {AcsCpe, AcsCpeModel, AcsTask} from './AcsAPI';
 import AcsActions from './AcsActions';
 import AcsKpiCharts from './AcsKpiCharts';
+import AcsParameters from './AcsParameters';
+import AcsSessionLog from './AcsSessionLog';
+import AcsTasks from './AcsTasks';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -313,7 +316,18 @@ export default function AcsCpeDetail() {
 
   const header = `ACS / ${data ? cpeName(data.cpe) : cpeKey}`;
 
-  const tabs = [{label: 'Overview', to: 'overview'}];
+  const pendingCount =
+    data?.tasks.filter(t => t.status === 'pending').length ?? 0;
+  const tabs = [
+    {label: 'Overview', to: 'overview'},
+    {label: 'Parameters', to: 'parameters'},
+    {
+      label: pendingCount ? `Tasks (${pendingCount} pending)` : 'Tasks',
+      to: 'tasks',
+      key: 'Tasks',
+    },
+    {label: 'Session Log', to: 'sessions'},
+  ];
 
   let body: React.ReactNode;
   if (!data && isLoading) {
@@ -363,6 +377,15 @@ export default function AcsCpeDetail() {
           <Route
             path="/overview"
             element={<Overview networkId={networkId} data={data} />}
+          />
+          <Route
+            path="/parameters"
+            element={<AcsParameters networkId={networkId} cpeKey={cpeKey} />}
+          />
+          <Route path="/tasks" element={<AcsTasks tasks={data.tasks} />} />
+          <Route
+            path="/sessions"
+            element={<AcsSessionLog networkId={networkId} cpeKey={cpeKey} />}
           />
           <Route index element={<Navigate to="overview" replace />} />
         </Routes>
