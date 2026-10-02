@@ -14,7 +14,7 @@ from datetime import datetime
 from unittest import TestCase
 
 from magma.tr069 import models
-from magma.tr069.spyne_mods import as_dict
+from magma.tr069.spyne_mods import REDACTED, as_dict, redact_secrets
 
 
 class SpineModsTests(TestCase):
@@ -65,3 +65,32 @@ class SpineModsTests(TestCase):
             'CurrentTime': '2021-09-15 16:15:43.351680',
         }
         self.assertEqual(out, expected)
+
+
+class RedactSecretsTests(TestCase):
+    def test_password_values_are_redacted(self):
+        spv = models.SetParameterValues(
+            ParameterList=models.ParameterValueList(
+                ParameterValueStruct=[
+                    models.ParameterValueStruct(
+                        Name=name, Value=models.anySimpleType(Data=value),
+                    )
+                    for name, value in (
+                        ('Device.ManagementServer.Username', 'cpe-1'),
+                        ('Device.ManagementServer.Password', 'hunter2'),
+                        ('Device.ManagementServer.ConnectionRequestPassword', 'pw2'),
+                    )
+                ],
+            ),
+        )
+        out = str(redact_secrets(as_dict(spv)))
+        self.assertIn('cpe-1', out)
+        self.assertNotIn('hunter2', out)
+        self.assertNotIn('pw2', out)
+        self.assertEqual(out.count(REDACTED), 2)
+
+    def test_other_shapes_pass_through(self):
+        self.assertEqual(redact_secrets('x'), 'x')
+        self.assertEqual(
+            redact_secrets({'Name': 'A.Password'}), {'Name': 'A.Password'},
+        )
