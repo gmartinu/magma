@@ -26,3 +26,20 @@ cwmp_auth:
   username: acs-dev-cpe
   password: acs-dev-only-not-a-secret
   nonce_ttl_secs: 300
+
+# Claimed mode: the HTTPS WAN listener for CPEs outside the Magma core, with
+# the self-signed cert the `wancert` one-shot writes. Published to the host
+# as 127.0.0.1:48443.
+#
+# DEV ONLY: a fixed bootstrap credential, so cpe-sim can claim-bootstrap a
+# CPE; acsd rotates each claimed CPE off it to a per-CPE credential on its
+# first session. Never ship it; the real acsd.yml leaves it unset.
+cwmp_wan:
+  enabled: true
+  interface: eth0
+  address: 0.0.0.0
+  port: 48443
+  cert_path: /var/opt/magma/certs/acsd_wan.crt
+  key_path: /var/opt/magma/certs/acsd_wan.key
+  bootstrap_username: acs-dev-bootstrap
+  bootstrap_password: acs-dev-bootstrap-not-a-secret

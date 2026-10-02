@@ -28,6 +28,7 @@ x-py: &py
     - ./.gen:/build/gen:ro
     - ./.deps:/opt/acs-dev-deps:ro
     - magma-tmp:/var/opt/magma/tmp
+    - acsd-certs:/var/opt/magma/certs:ro
   cpus: 1
   mem_limit: 512m
   restart: "no"
@@ -40,6 +41,22 @@ services:
       - ../../../..:/magma:ro
       - ./.gen:/out
     entrypoint: ["/magma/lte/gateway/docker/acs-dev/gen_protos.sh"]
+
+  # One-shot: a self-signed cert for acsd's claimed (WAN) listener, made by
+  # `acsd_cli.py dev-cert` into the acsd-certs volume (skipped once there).
+  # DEV ONLY: CPEs only accept it with verification off or this cert pinned.
+  wancert:
+    <<: *py
+    network_mode: none
+    volumes:
+      - ../../../..:/magma:ro
+      - acsd-certs:/certs
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        test -s /certs/acsd_wan.crt ||
+        python3 /magma/lte/gateway/python/scripts/acsd_cli.py dev-cert
+        --out-dir /certs --cn 127.0.0.1
 
   # One-shot: pip-installs requirements.txt into ./.deps (skipped once done).
   pydeps:
@@ -61,13 +78,16 @@ services:
     # the stock service_registry.yml (all 127.0.0.1) works unchanged.
     networks: [acsnet]
     ports:
-      - "127.0.0.1:48081:48081"   # CWMP (acsd)
+      - "127.0.0.1:48081:48081"   # CWMP core listener (acsd)
+      - "127.0.0.1:48443:48443"   # CWMP claimed listener, HTTPS (acsd)
     cpus: 0.5
     mem_limit: 256m
     depends_on:
       protogen:
         condition: service_completed_successfully
       pydeps:
+        condition: service_completed_successfully
+      wancert:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "6380", "ping"]
@@ -117,3 +137,4 @@ networks:
 
 volumes:
   magma-tmp:
+  acsd-certs:
