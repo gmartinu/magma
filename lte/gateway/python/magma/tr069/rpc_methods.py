@@ -14,7 +14,7 @@ limitations under the License.
 from typing import Protocol
 
 from magma.tr069.logger import logger
-from magma.tr069.spyne_mods import as_dict
+from magma.tr069.spyne_mods import as_dict, redact_secrets
 from spyne.decorator import rpc
 from spyne.model.complex import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
@@ -107,12 +107,18 @@ class AutoConfigServer(ServiceBase):
         message: ComplexModelBase,
     ) -> ComplexModelBase:
         # Log incoming msg
-        logger.debug('Handling TR069 message: %s %s', message.__class__.__name__, str(as_dict(message)))
+        logger.debug(
+            'Handling TR069 message: %s %s', message.__class__.__name__,
+            str(redact_secrets(as_dict(message))),
+        )
 
         req = cls._get_tr069_response_from_sm(ctx, message)
 
         # Log outgoing msg
-        logger.debug('Sending TR069 message: %s %s', req.__class__.__name__, str(as_dict(req)))
+        logger.debug(
+            'Sending TR069 message: %s %s', req.__class__.__name__,
+            str(redact_secrets(as_dict(req))),
+        )
 
         # Set header
         ctx.out_header = models.ID(mustUnderstand='1')
