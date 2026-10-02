@@ -36,6 +36,13 @@ TASK_DONE = 'done'
 TASK_FAILED = 'failed'
 TASK_EXPIRED = 'expired'
 FINISHED = (TASK_DONE, TASK_FAILED, TASK_EXPIRED)
+TASK_STATUSES = (TASK_PENDING, TASK_IN_PROGRESS) + FINISHED
+
+# How a session ended: acsd ran the queue dry, the CPE went quiet past the
+# session timeout, or something else cut it short (a new Inform, a restart).
+SESSION_COMPLETED = 'completed'
+SESSION_TIMED_OUT = 'timed_out'
+SESSION_INTERRUPTED = 'interrupted'
 
 
 class TaskNotFound(KeyError):
@@ -82,6 +89,9 @@ class Session:
     task_step: int = 0
     created: float = 0.0
     expires: float = 0.0
+    tasks_done: int = 0
+    tasks_failed: int = 0
+    faults: int = 0
 
 
 @dataclass
@@ -107,6 +117,33 @@ class InformCount:
     window_end: float
     total: int
     last_inform: float
+
+
+@dataclass
+class SessionOutcome:
+    """How the last CWMP session of a CPE ended."""
+    cpe_key: str
+    session_id: str
+    result: str
+    reason: str = ''
+    started: float = 0.0
+    ended: float = 0.0
+    tasks_done: int = 0
+    tasks_failed: int = 0
+    faults: int = 0
+
+
+class StoreListener:
+    """
+    Told of session ends and of tasks reaching a final status, whichever
+    path got them there. Called under the store lock: it must not block.
+    """
+
+    def session_ended(self, outcome: SessionOutcome) -> None:
+        pass
+
+    def task_finished(self, task: 'Task') -> None:
+        pass
 
 
 @dataclass
@@ -139,8 +176,10 @@ class AcsStore:
         prefix: str = 'acsd',
         clock: Callable[[], float] = time.time,
         session_timeout_sec: float = SESSION_TIMEOUT_SEC,
+        listener: Optional[StoreListener] = None,
     ):
         self._clock = clock
+        self._listener = listener or StoreListener()
         self._lock = threading.RLock()
         self.session_timeout_sec = session_timeout_sec
 
@@ -156,6 +195,7 @@ class AcsStore:
         self._params = hash_dict('params')
         self._models = hash_dict('models')
         self._informs = hash_dict('informs')
+        self._outcomes = hash_dict('outcomes')
 
     # Sessions
 
@@ -177,16 +217,31 @@ class AcsStore:
     def list_sessions(self) -> List[Session]:
         return [Session(**raw) for raw in self._sessions.values()]
 
-    def end_session(self, source_ip: str, reason: str) -> int:
+    def end_session(
+        self, source_ip: str, reason: str, result: str = SESSION_INTERRUPTED,
+    ) -> int:
         """
         Close the session from source_ip and requeue the task it was
         running. Returns the number of tasks requeued or failed.
         """
         with self._lock:
-            raw = self._sessions.pop(source_ip, None)
+            raw = self._sessions.get(source_ip)
             if raw is None:
                 return 0
-            return self._release_tasks(raw['cpe_key'], {raw['session_id']}, reason)
+            return self.close_session(Session(**raw), result, reason)
+
+    def close_session(self, session: Session, result: str, reason: str) -> int:
+        """
+        end_session for a session the caller holds: its copy wins over the
+        stored one, which lags the counters of the exchange in flight.
+        """
+        with self._lock:
+            self._sessions.pop(session.source_ip, None)
+            released = self._release_tasks(
+                session.cpe_key, {session.session_id}, reason,
+            )
+            self._record_outcome(session, result, reason)
+            return released
 
     def end_cpe_sessions(self, cpe_key: str, reason: str) -> int:
         """Close every session of a CPE, e.g. when it starts a new one."""
@@ -213,12 +268,16 @@ class AcsStore:
             for session in self.list_sessions():
                 if session.expires <= now:
                     self._sessions.pop(session.source_ip, None)
+                    self._record_outcome(
+                        session, SESSION_TIMED_OUT, 'session timed out',
+                    )
                     res.sessions += 1
             res.requeued_tasks = self._release_orphans('session timed out')
             for task in self._all_tasks():
                 if task.status == TASK_PENDING and _past(task.deadline, now):
                     task.status, task.updated = TASK_EXPIRED, now
                     self._save(task)
+                    self._listener.task_finished(task)
                     res.expired_tasks += 1
             return res
 
@@ -301,6 +360,7 @@ class AcsStore:
             task.fault_code, task.fault_string = 0, ''
             task.updated = self._clock()
             self._save(task)
+            self._listener.task_finished(task)
             return task
 
     def fail_task(
@@ -328,6 +388,8 @@ class AcsStore:
             task.fault_code, task.fault_string = fault_code, fault_string
             task.updated = now
             self._save(task)
+            if task.status == TASK_FAILED:
+                self._listener.task_finished(task)
             return task
 
     # Parameters and informs
@@ -378,7 +440,39 @@ class AcsStore:
         raw = self._informs.get(cpe_key)
         return InformCount(**raw) if raw else None
 
+    # CPE views
+
+    def list_cpe_keys(self) -> List[str]:
+        """Every CPE that has sent an Inform."""
+        return sorted(self._informs.keys())
+
+    def get_last_session(self, cpe_key: str) -> Optional[SessionOutcome]:
+        raw = self._outcomes.get(cpe_key)
+        return SessionOutcome(**raw) if raw else None
+
+    def task_counts(self) -> Dict[str, int]:
+        """Stored tasks of every CPE by status."""
+        counts = dict.fromkeys(TASK_STATUSES, 0)
+        for task in self._all_tasks():
+            counts[task.status] = counts.get(task.status, 0) + 1
+        return counts
+
     # Internals
+
+    def _record_outcome(self, session: Session, result: str, reason: str) -> None:
+        outcome = SessionOutcome(
+            cpe_key=session.cpe_key,
+            session_id=session.session_id,
+            result=result,
+            reason=reason,
+            started=session.created,
+            ended=self._clock(),
+            tasks_done=session.tasks_done,
+            tasks_failed=session.tasks_failed,
+            faults=session.faults,
+        )
+        self._outcomes[session.cpe_key] = asdict(outcome)
+        self._listener.session_ended(outcome)
 
     def _save(self, task: Task) -> None:
         self._tasks[task.task_id] = asdict(task)
@@ -420,6 +514,8 @@ class AcsStore:
         task.session_id, task.fault_code, task.fault_string = '', 0, reason
         task.updated = now
         self._save(task)
+        if task.status == TASK_FAILED:
+            self._listener.task_finished(task)
 
     def _prune(self, queue: List[str]) -> List[str]:
         """Drop the oldest finished tasks beyond FINISHED_TASKS_KEPT."""
