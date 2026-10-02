@@ -201,9 +201,6 @@ class MainWiringTest(unittest.TestCase):
 
 
 class SkeletonTest(unittest.TestCase):
-    def test_no_operational_states_yet(self):
-        self.assertEqual(main._get_operational_states(), [])
-
     def test_mode_defaults_to_active(self):
         self.assertEqual(mconfigs_pb2.AcsD().mode, mconfigs_pb2.AcsD.ACTIVE)
 

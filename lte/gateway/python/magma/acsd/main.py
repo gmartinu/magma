@@ -12,9 +12,10 @@ limitations under the License.
 """
 
 import _thread
+import asyncio
 import logging
 import threading
-from typing import List, Optional
+from typing import Optional
 
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.config import (
@@ -25,6 +26,7 @@ from magma.acsd.config import (
     get_cwmp_bind,
     get_cwmp_workers,
 )
+from magma.acsd.cpe_state import CpeViews
 from magma.acsd.digest import (
     DigestAuthenticator,
     NonceStore,
@@ -32,18 +34,32 @@ from magma.acsd.digest import (
 )
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.server import make_cwmp_server
-from magma.acsd.session import CwmpSessionHandler
+from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
 from magma.acsd.store import AcsStore
 from magma.common.redis.client import get_default_client
 from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
 from magma.configuration import load_service_config
-from orc8r.protos.service303_pb2 import State
 
 
-def _get_operational_states() -> List[State]:
-    # `cpe_acs` state is reported once acsd keeps per-CPE state (Stage 2).
-    return []
+def schedule_reaper(
+    loop: asyncio.AbstractEventLoop,
+    store: AcsStore,
+    interval_sec: float = REAP_INTERVAL_SEC,
+) -> None:
+    """
+    Reap on a timer too: the handler only reaps when an Inform arrives, so
+    on a quiet gateway dead sessions would linger in the state and pending
+    tasks would never expire.
+    """
+    def reap():
+        try:
+            store.reap_expired()
+        except Exception:  # pylint: disable=broad-except
+            logging.exception('Reaping acsd sessions and tasks failed')
+        finally:
+            loop.call_later(interval_sec, reap)
+    loop.call_soon(reap)
 
 
 def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
@@ -118,8 +134,9 @@ def main():
         bind.interface, bind.address, bind.port, workers,
     )
 
-    # Register a callback function for GetOperationalStates
-    service.register_operational_states_callback(_get_operational_states)
+    views = CpeViews(store, service.mconfig.periodic_inform_interval)
+    service.register_operational_states_callback(views.operational_states)
+    schedule_reaper(service.loop, store)
 
     # Run the service loop
     service.run()
