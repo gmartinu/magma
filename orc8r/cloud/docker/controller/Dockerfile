@@ -40,8 +40,13 @@ RUN apt-get update && apt-get install -y \
 # Golang
 WORKDIR /usr/local
 ARG GOLANG_VERSION="1.20.1"
-RUN GO_TARBALL="go${GOLANG_VERSION}.linux-amd64.tar.gz" \
- && curl https://linuxfoundation.jfrog.io/artifactory/magma-blob/${GO_TARBALL} --remote-name --location \
+# The magma blob store only mirrors the amd64 tarball; other arches (e.g.
+# a native arm64 build with PLATFORM=linux/arm64) come from go.dev.
+RUN ARCH="$(dpkg --print-architecture)" \
+ && GO_TARBALL="go${GOLANG_VERSION}.linux-${ARCH}.tar.gz" \
+ && if [ "${ARCH}" = "amd64" ]; then GO_URL="https://linuxfoundation.jfrog.io/artifactory/magma-blob/${GO_TARBALL}"; \
+    else GO_URL="https://go.dev/dl/${GO_TARBALL}"; fi \
+ && curl -f "${GO_URL}" --output ${GO_TARBALL} --location \
  && tar -xzf ${GO_TARBALL} \
  && ln -s /usr/local/go/bin/go /usr/local/bin/go \
  && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
@@ -53,7 +58,8 @@ RUN GO_TARBALL="go${GOLANG_VERSION}.linux-amd64.tar.gz" \
 # Protobuf compiler
 # Apt has 2.x but we need 3.x
 # See: https://grpc.io/docs/protoc-installation/
-RUN curl -Lfs https://github.com/protocolbuffers/protobuf/releases/download/v3.10.0/protoc-3.10.0-linux-x86_64.zip -o protoc3.zip && \
+RUN case "$(dpkg --print-architecture)" in arm64) PROTOC_ARCH=aarch_64 ;; *) PROTOC_ARCH=x86_64 ;; esac && \
+    curl -Lfs https://github.com/protocolbuffers/protobuf/releases/download/v3.10.0/protoc-3.10.0-linux-${PROTOC_ARCH}.zip -o protoc3.zip && \
     unzip protoc3.zip -d protoc3 && \
     mv protoc3/bin/protoc /bin/protoc && \
     chmod a+rx /bin/protoc && \
