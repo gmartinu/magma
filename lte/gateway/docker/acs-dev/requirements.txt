@@ -1,0 +1,2 @@
+# Python deps the fork needs that the prebuilt 1.8.0 image lacks.
+sdnotify==0.3.2
