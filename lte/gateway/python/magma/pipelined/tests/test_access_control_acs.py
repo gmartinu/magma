@@ -23,6 +23,7 @@ from magma.pipelined.app.access_control import (
 from magma.pipelined.openflow.registers import DIRECTION_REG, Direction
 from ryu.lib.packet import ether_types
 from ryu.lib.packet.in_proto import IPPROTO_TCP
+from ryu.ofproto import ofproto_v1_4_parser
 
 MTR_NET = ipaddress.IPv4Network('10.1.0.1')
 MTR_MATCH = (MTR_NET.network_address, MTR_NET.netmask)
@@ -94,19 +95,30 @@ class AcsMatchTest(unittest.TestCase):
         acs = self._matches()[0]
         self.assertEqual(acs['tcp_dst'], 48081)
         self.assertNotIn('tcp_src', acs)
-        self.assertNotIn('tcp_flags_nxm', acs)
+        self.assertNotIn('tcp_flags', acs)
 
     def test_cr_reply_flows_never_allow_a_bare_syn(self):
         replies = self._matches()[1:]
         self.assertEqual(len(replies), 2)
-        flags = {m['tcp_flags_nxm'] for m in replies}
+        flags = {m['tcp_flags'] for m in replies}
         self.assertEqual(flags, {(0x012, 0x012), (0, 0x002)})
         for match in replies:
             self.assertEqual(match['tcp_src'], DEFAULT_ACS_CONNECTION_REQUEST_PORT)
             self.assertNotIn('tcp_dst', match)
-            value, mask = match['tcp_flags_nxm']
+            value, mask = match['tcp_flags']
             # A SYN without ACK (new connection) must not match any flow.
             self.assertNotEqual(0x002 & mask, value)
+
+    def test_cr_reply_flows_put_tcp_flags_after_prerequisites(self):
+        # OVS rejects a match whose field precedes its prerequisites
+        # (OFPBMC_BAD_PREREQ); ryu, not the caller, decides the order.
+        for match in self._matches()[1:]:
+            fields = [
+                f for f, _ in ofproto_v1_4_parser.OFPMatch(**match)._fields2
+            ]
+            flags_at = fields.index('tcp_flags')
+            for prereq in ('eth_type', 'ip_proto', 'tcp_src'):
+                self.assertLess(fields.index(prereq), flags_at)
 
     def test_no_cr_flows_without_cr_port(self):
         self.assertEqual(len(self._matches(cr_port=None)), 1)

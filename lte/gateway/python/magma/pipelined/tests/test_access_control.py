@@ -657,12 +657,12 @@ class AccessControlTestLocalIpBlockLTEAcs(AbstractAccessControlTest):
                 FlowTest(self._tcp_query(tcp_dst=self.ACS_PORT), 1, flow_count=1),
                 FlowTest(
                     self._tcp_query(
-                        tcp_src=self.CR_PORT, tcp_flags_nxm=(0x012, 0x012),
+                        tcp_src=self.CR_PORT, tcp_flags=(0x012, 0x012),
                     ), 1, flow_count=1,
                 ),
                 FlowTest(
                     self._tcp_query(
-                        tcp_src=self.CR_PORT, tcp_flags_nxm=(0, 0x002),
+                        tcp_src=self.CR_PORT, tcp_flags=(0, 0x002),
                     ), 0, flow_count=1,
                 ),
             ],
