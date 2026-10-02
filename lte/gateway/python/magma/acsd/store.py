@@ -75,6 +75,8 @@ class Session:
     source_ip: str
     # Data model root from the Inform: 'Device.' or 'InternetGatewayDevice.'.
     root: str = 'Device.'
+    # Name of the datamodel handler picked from the Inform DeviceId.
+    model_handler: str = ''
     pending_task_id: str = ''
     pending_method: str = ''
     task_step: int = 0

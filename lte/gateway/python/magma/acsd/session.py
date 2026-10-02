@@ -18,6 +18,14 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from magma.acsd import tasks
+from magma.acsd.datamodel import (
+    DEFAULT_REGISTRY,
+    ROOT_TR181,
+    Handler,
+    Registry,
+    detect_root,
+    device_info,
+)
 from magma.acsd.store import TASK_IN_PROGRESS, AcsStore, Session, Task
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
@@ -61,12 +69,12 @@ class CwmpSessionHandler:
         identify: IdentifyFn = accept_all,
         *,
         store: AcsStore,
-        refresh_paths: tasks.RefreshPathsFn = tasks.default_refresh_paths,
+        registry: Registry = DEFAULT_REGISTRY,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._identify = identify
         self._store = store
-        self._refresh_paths = refresh_paths
+        self._registry = registry
         self._clock = clock
         self._reap_lock = threading.Lock()
         self._next_reap = 0.0
@@ -125,12 +133,14 @@ class CwmpSessionHandler:
         self._store.end_session(source_ip, 'CPE started a new session')
         self._store.end_imsi_sessions(identity, 'CPE started a new session')
         values = _inform_values(inform)
+        handler = self._registry.select(device_info(inform, values))
         self._store.put_session(
             Session(
                 session_id=uuid.uuid4().hex,
                 imsi=identity,
                 source_ip=source_ip,
-                root=_root_of(values),
+                root=detect_root(values) or ROOT_TR181,
+                model_handler=handler.name,
                 created=time.time(),
             ),
         )
@@ -138,8 +148,9 @@ class CwmpSessionHandler:
         if values:
             self._store.merge_parameters(identity, values)
         logging.info(
-            'Inform from %s (serial %s, identity %s, %d tasks pending)',
-            source_ip, serial, identity, self._store.pending_count(identity),
+            'Inform from %s (serial %s, identity %s, handler %s, '
+            '%d tasks pending)', source_ip, serial, identity, handler.name,
+            self._store.pending_count(identity),
         )
         return models.InformResponse(MaxEnvelopes=1)
 
@@ -244,7 +255,10 @@ class CwmpSessionHandler:
         return task
 
     def _plan(self, task: Task, session: Session) -> List[ComplexModelBase]:
-        return tasks.plan(task, session.root, self._refresh_paths)
+        return tasks.plan(task, session.root, self._handler(session))
+
+    def _handler(self, session: Session) -> Handler:
+        return self._registry.get(session.model_handler)
 
     def _finish(self, session: Session, task: Task, result: Dict[str, Any]) -> None:
         if result.get('values'):
@@ -293,8 +307,3 @@ def _inform_values(inform: models.Inform) -> Dict[str, str]:
             values[p.Name] = '' if data is None else str(data)
     return values
 
-
-def _root_of(values: Dict[str, str]) -> str:
-    if any(name.startswith('InternetGatewayDevice.') for name in values):
-        return 'InternetGatewayDevice.'
-    return 'Device.'

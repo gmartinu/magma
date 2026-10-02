@@ -15,6 +15,7 @@ import unittest
 
 import fakeredis
 from magma.acsd import tasks
+from magma.acsd.datamodel import GENERIC, Spec
 from magma.acsd.store import AcsStore, Task
 from magma.tr069 import models
 
@@ -90,16 +91,17 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(request.ParameterNames.string, ['A', 'B'])
         self.assertEqual(request.ParameterNames.arrayType, 'xsd:string[2]')
 
-    def test_refresh_reads_one_subtree_per_request(self):
+    def test_refresh_reads_the_generic_handler_paths(self):
         plan = tasks.plan(_task(tasks.REFRESH), 'Device.')
         self.assertEqual(
             [r.ParameterNames.string for r in plan],
-            [['Device.DeviceInfo.'], ['Device.Cellular.']],
+            [[p] for p in GENERIC.refresh_paths('Device.')],
         )
         plan = tasks.plan(_task(tasks.REFRESH), 'InternetGatewayDevice.')
-        self.assertEqual(len(plan), 1)
-        plan = tasks.plan(_task(tasks.REFRESH), 'Device.', lambda root: [root])
-        self.assertEqual(plan[0].ParameterNames.string, ['Device.'])
+        self.assertEqual(len(plan), len(GENERIC.refresh_paths('InternetGatewayDevice.')))
+        handler = Spec(name='t', refresh={'Device.': ('Device.',)})
+        plan = tasks.plan(_task(tasks.REFRESH), 'Device.', handler)
+        self.assertEqual([r.ParameterNames.string for r in plan], [['Device.']])
 
     def test_set_parameter_values(self):
         request, = tasks.plan(

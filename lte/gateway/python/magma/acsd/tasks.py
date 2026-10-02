@@ -11,8 +11,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
+from magma.acsd.datamodel import GENERIC, Handler, gpv_batches
 from magma.acsd.store import TASK_MAX_ATTEMPTS, TASK_TTL_SEC, AcsStore, Task
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
@@ -34,19 +35,9 @@ FAULT_INVALID_ARGUMENTS = 9003
 FAULT_RESOURCES_EXCEEDED = 9004
 FAULT_INVALID_PARAMETER_NAME = 9005
 
-# Picks the subtrees a refresh reads, from the data model root. The
-# handler framework (2.3) replaces this per device.
-RefreshPathsFn = Callable[[str], List[str]]
-
 
 class InvalidTask(ValueError):
     pass
-
-
-def default_refresh_paths(root: str) -> List[str]:
-    if root == 'InternetGatewayDevice.':
-        return [root + 'DeviceInfo.']
-    return [root + 'DeviceInfo.', root + 'Cellular.']
 
 
 def validate(task_type: str, args: Dict[str, Any]) -> None:
@@ -115,9 +106,13 @@ def enqueue_task(
 def plan(
     task: Task,
     root: str,
-    refresh_paths: RefreshPathsFn = default_refresh_paths,
+    handler: Handler = GENERIC,
 ) -> List[ComplexModelBase]:
-    """The CWMP requests that run a task, one per HTTP exchange."""
+    """
+    The CWMP requests that run a task, one per HTTP exchange. `handler`
+    names the subtrees a refresh reads and caps the names per
+    GetParameterValues for its CPE model.
+    """
     args = task.args
     if task.type == REBOOT:
         # The CPE echoes the command key in its 'M Reboot' event.
@@ -125,10 +120,10 @@ def plan(
     if task.type == FACTORY_RESET:
         return [models.FactoryReset()]
     if task.type == GET_PARAMETER_VALUES:
-        return [_gpv(args['parameter_names'])]
+        return _gpvs(args['parameter_names'], handler)
     if task.type == REFRESH:
-        paths = args.get('parameter_names') or refresh_paths(root)
-        return [_gpv([path]) for path in paths]
+        paths = args.get('parameter_names') or handler.refresh_paths(root)
+        return _gpvs(paths, handler)
     if task.type == SET_PARAMETER_VALUES:
         return [_spv(args['parameter_values'], task.task_id[:32])]
     if task.type == GET_PARAMETER_NAMES:
@@ -184,6 +179,10 @@ def _check_names(names: Sequence[str]) -> None:
     for name in names:
         if not isinstance(name, str) or not name.strip():
             raise InvalidTask('parameter names cannot be empty')
+
+
+def _gpvs(names: Sequence[str], handler: Handler) -> List[models.GetParameterValues]:
+    return [_gpv(batch) for batch in gpv_batches(names, handler.quirks)]
 
 
 def _gpv(names: Sequence[str]) -> models.GetParameterValues:

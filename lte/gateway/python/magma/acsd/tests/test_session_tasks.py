@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import fakeredis
 from magma.acsd import tasks
 from magma.acsd.config import CwmpBind
+from magma.acsd.datamodel import Registry, Spec
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
 from magma.acsd.store import (
@@ -160,6 +161,13 @@ class SessionTasksTest(unittest.TestCase):
         )
 
     def test_refresh_skips_missing_subtrees_and_updates_the_snapshot(self):
+        self.handler = CwmpSessionHandler(
+            lambda ip, inform: IMSI, store=self.store, registry=Registry(
+                fallback=Spec(name='t', refresh={
+                    'Device.': ('Device.DeviceInfo.', 'Device.Cellular.'),
+                }),
+            ),
+        )
         task = self.enqueue(tasks.REFRESH)
         self.send(_inform(**{'Device.DeviceInfo.SerialNumber': 'SIM0001'}))
         first = self.send(models.DummyInput())
