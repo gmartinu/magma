@@ -146,6 +146,21 @@ class StoreListener:
         pass
 
 
+class StoreListeners(StoreListener):
+    """Passes every notification to each of `listeners`."""
+
+    def __init__(self, *listeners: StoreListener):
+        self._listeners = listeners
+
+    def session_ended(self, outcome: SessionOutcome) -> None:
+        for listener in self._listeners:
+            listener.session_ended(outcome)
+
+    def task_finished(self, task: 'Task') -> None:
+        for listener in self._listeners:
+            listener.task_finished(task)
+
+
 @dataclass
 class ReapResult:
     sessions: int = 0
