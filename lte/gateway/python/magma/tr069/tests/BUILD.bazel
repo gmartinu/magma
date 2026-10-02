@@ -9,6 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@python_deps//:requirements.bzl", "requirement")
 load("//bazel:python_test.bzl", "pytest_test")
 
 MAGMA_ROOT = "../../../../../../"
@@ -61,5 +62,18 @@ pytest_test(
     deps = [
         "//lte/gateway/python/magma/tr069:models",
         "//lte/gateway/python/magma/tr069:spyne_mods",
+    ],
+)
+
+pytest_test(
+    name = "rpc_methods_tests",
+    size = "small",
+    srcs = ["rpc_methods_tests.py"],
+    imports = [LTE_ROOT],
+    deps = [
+        "//lte/gateway/python/magma/tr069:models",
+        "//lte/gateway/python/magma/tr069:rpc_methods",
+        "//lte/gateway/python/magma/tr069:spyne_mods",
+        requirement("spyne"),
     ],
 )

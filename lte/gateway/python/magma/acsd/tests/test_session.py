@@ -15,8 +15,14 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import fakeredis
 from magma.acsd.session import HTTP_403, CwmpSessionHandler, accept_all
+from magma.acsd.store import AcsStore
 from magma.tr069 import models
+
+
+def memory_store():
+    return AcsStore(fakeredis.FakeStrictRedis())
 
 
 def _ctx(source_ip='192.168.128.12'):
@@ -36,19 +42,19 @@ def _inform(serial='SIM0001'):
 class CwmpSessionHandlerTest(unittest.TestCase):
     def test_inform_gets_inform_response(self):
         ctx = _ctx()
-        resp = CwmpSessionHandler().handle_tr069_message(ctx, _inform())
+        resp = CwmpSessionHandler(store=memory_store()).handle_tr069_message(ctx, _inform())
         self.assertIsInstance(resp, models.InformResponse)
         self.assertEqual(resp.MaxEnvelopes, 1)
         self.assertIsNone(ctx.transport.resp_code)
 
     def test_empty_post_ends_session(self):
-        resp = CwmpSessionHandler().handle_tr069_message(
+        resp = CwmpSessionHandler(store=memory_store()).handle_tr069_message(
             _ctx(), models.DummyInput(),
         )
         self.assertIsInstance(resp, models.DummyInput)
 
     def test_unsolicited_message_ends_session(self):
-        resp = CwmpSessionHandler().handle_tr069_message(
+        resp = CwmpSessionHandler(store=memory_store()).handle_tr069_message(
             _ctx(), models.GetParameterValuesResponse(),
         )
         self.assertIsInstance(resp, models.DummyInput)
@@ -56,27 +62,27 @@ class CwmpSessionHandlerTest(unittest.TestCase):
     def test_identify_gets_source_ip_and_inform(self):
         identify = mock.Mock(return_value='IMSI001010000000001')
         inform = _inform()
-        CwmpSessionHandler(identify).handle_tr069_message(
+        CwmpSessionHandler(identify, store=memory_store()).handle_tr069_message(
             _ctx('192.168.128.40'), inform,
         )
         identify.assert_called_once_with('192.168.128.40', inform)
 
     def test_identify_only_runs_on_inform(self):
         identify = mock.Mock(return_value='IMSI001010000000001')
-        CwmpSessionHandler(identify).handle_tr069_message(
+        CwmpSessionHandler(identify, store=memory_store()).handle_tr069_message(
             _ctx(), models.DummyInput(),
         )
         identify.assert_not_called()
 
     def test_refused_session_is_403_without_inform_response(self):
         ctx = _ctx()
-        resp = CwmpSessionHandler(lambda ip, inform: None) \
+        resp = CwmpSessionHandler(lambda ip, inform: None, store=memory_store()) \
             .handle_tr069_message(ctx, _inform())
         self.assertIsInstance(resp, models.DummyInput)
         self.assertEqual(ctx.transport.resp_code, HTTP_403)
 
     def test_inform_without_device_id(self):
-        resp = CwmpSessionHandler().handle_tr069_message(
+        resp = CwmpSessionHandler(store=memory_store()).handle_tr069_message(
             _ctx(), models.Inform(),
         )
         self.assertIsInstance(resp, models.InformResponse)
@@ -90,7 +96,7 @@ class SessionIdentityTest(unittest.TestCase):
 
     def setUp(self):
         self.identity = self.IMSI
-        self.handler = CwmpSessionHandler(lambda ip, inform: self.identity)
+        self.handler = CwmpSessionHandler(lambda ip, inform: self.identity, store=memory_store())
 
     def test_identity_held_after_inform(self):
         self.handler.handle_tr069_message(_ctx('10.1.0.5'), _inform())

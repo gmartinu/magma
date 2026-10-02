@@ -17,6 +17,7 @@ import os
 import unittest
 from unittest import mock
 
+import fakeredis
 import yaml
 from google.protobuf import json_format
 from lte.protos.mconfig import mconfigs_pb2
@@ -29,6 +30,12 @@ from magma.acsd.config import (
     get_cwmp_workers,
 )
 from magma.acsd.session import CwmpSessionHandler
+from magma.acsd.store import AcsStore
+
+
+def memory_store():
+    return AcsStore(fakeredis.FakeStrictRedis())
+
 
 MAGMA_ROOT = os.environ.get('MAGMA_ROOT')
 CONFIG_DIR = os.path.join(MAGMA_ROOT or '', 'lte/gateway/configs')
@@ -65,7 +72,7 @@ class CwmpWorkersTest(unittest.TestCase):
 class CwmpListenerWiringTest(unittest.TestCase):
     def test_listener_answers_empty_post(self):
         thread = main.start_cwmp_listener(
-            CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(), 2,
+            CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(store=memory_store()), 2,
         )
         server = thread.server
         try:
@@ -86,7 +93,7 @@ class CwmpListenerWiringTest(unittest.TestCase):
                 mock.patch.object(main, 'make_cwmp_server') as make_server:
             make_server.return_value.serve_forever.side_effect = OSError
             main.start_cwmp_listener(
-                CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(), 1,
+                CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(store=memory_store()), 1,
             ).join(5)
         interrupt.assert_called_once_with()
 

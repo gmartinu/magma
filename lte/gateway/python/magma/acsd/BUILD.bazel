@@ -48,8 +48,10 @@ py_library(
         ":acsd_lib",
         ":server",
         ":session",
+        ":store",
         "//lte/protos:mconfigs_python_proto",
         "//orc8r/gateway/python/magma/common:sentry",
+        "//orc8r/gateway/python/magma/common/redis:client",
         "//orc8r/gateway/python/magma/common:service",
         "//orc8r/gateway/python/magma/configuration:service_configs",
         "//orc8r/protos:service303_python_proto",
@@ -68,6 +70,8 @@ py_library(
     srcs = ["session.py"],
     visibility = ["//visibility:public"],
     deps = [
+        ":store",
+        ":tasks",
         "//lte/gateway/python/magma/tr069:models",
         requirement("spyne"),
     ],
@@ -107,4 +111,15 @@ py_library(
     srcs = ["store.py"],
     visibility = ["//visibility:public"],
     deps = ["//orc8r/gateway/python/magma/common/redis:containers"],
+)
+
+py_library(
+    name = "tasks",
+    srcs = ["tasks.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":store",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("spyne"),
+    ],
 )

@@ -18,6 +18,7 @@ import os
 import threading
 import unittest
 
+import fakeredis
 import grpc
 from lte.protos.subscriberdb_pb2 import SubscriberID
 from magma.acsd.bindings import BindingChangeKind, SerialBinder
@@ -26,7 +27,13 @@ from magma.acsd.identity import CpeIdentifier, SessionIdentifier
 from magma.acsd.mobilityd_client import MobilitydClient
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
+from magma.acsd.store import AcsStore
 from magma.tr069 import models
+
+
+def memory_store():
+    return AcsStore(fakeredis.FakeStrictRedis())
+
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'fixtures')
 XML = {'Content-Type': 'text/xml; charset=utf-8'}
@@ -114,7 +121,7 @@ class _ListenerHarness(unittest.TestCase):
         identify, self.stub = session_identifier(
             self.table, self.changes.append,
         )
-        self.handler = CwmpSessionHandler(identify)
+        self.handler = CwmpSessionHandler(identify, store=memory_store())
         self.server = make_cwmp_server(
             CwmpBind('lo', '127.0.0.1', 0), self.handler, workers=2,
         )

@@ -21,6 +21,8 @@ from magma.acsd.config import CwmpBind, get_cwmp_bind, get_cwmp_workers
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
+from magma.acsd.store import AcsStore
+from magma.common.redis.client import get_default_client
 from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
 from magma.configuration import load_service_config
@@ -67,7 +69,12 @@ def main():
     config = load_service_config('acsd')
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
-    handler = CwmpSessionHandler(identify=SessionIdentifier())
+    store = AcsStore(get_default_client())
+    # A new process cannot continue the HTTP exchanges of the last one.
+    requeued = store.end_all_sessions('acsd restarted')
+    if requeued:
+        logging.info('Requeued %d tasks left in progress', requeued)
+    handler = CwmpSessionHandler(identify=SessionIdentifier(), store=store)
     start_cwmp_listener(bind, handler, workers)
     logging.info(
         'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',

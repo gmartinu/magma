@@ -18,9 +18,16 @@ import threading
 import unittest
 import xml.etree.ElementTree as ET
 
+import fakeredis
 from magma.acsd.config import CwmpBind
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import CwmpSessionHandler
+from magma.acsd.store import AcsStore
+
+
+def memory_store():
+    return AcsStore(fakeredis.FakeStrictRedis())
+
 
 # sim4000_* are the request bodies of the simulator session replayed by the
 # Go codec tests (acs/cloud/go/services/acs/cwmp/testdata/captures).
@@ -39,8 +46,8 @@ class CwmpListenerTest(unittest.TestCase):
     identify = None
 
     def setUp(self):
-        handler = CwmpSessionHandler(self.identify) if self.identify \
-            else CwmpSessionHandler()
+        handler = CwmpSessionHandler(self.identify, store=memory_store()) if self.identify \
+            else CwmpSessionHandler(store=memory_store())
         self.server = make_cwmp_server(
             CwmpBind('lo', '127.0.0.1', 0), handler, workers=4,
         )
