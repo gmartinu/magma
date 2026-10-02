@@ -34,7 +34,14 @@ from magma.acsd.datamodel import (
     fill_identity,
 )
 from magma.acsd.digest import DIGEST_USERNAME
-from magma.acsd.store import TASK_IN_PROGRESS, AcsStore, Session, Task
+from magma.acsd.store import (
+    SESSION_COMPLETED,
+    TASK_FAILED,
+    TASK_IN_PROGRESS,
+    AcsStore,
+    Session,
+    Task,
+)
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
 from spyne.server.wsgi import WsgiMethodContext
@@ -211,6 +218,7 @@ class CwmpSessionHandler:
                 True,
             )
         elif isinstance(message, models.Fault):
+            session.faults += 1
             code = int(message.FaultCode or 0)
             fault = (code, tasks.fault_text(message), tasks.retryable(code))
         elif type(message).__name__ != method + 'Response':
@@ -246,7 +254,7 @@ class CwmpSessionHandler:
         """Send the next request of the session, or end it."""
         request = self._next_request(session)
         if request is None:
-            self._store.end_session(session.key, 'session ended')
+            self._store.close_session(session, SESSION_COMPLETED, 'session ended')
             logging.info('Session of %s done', session.cpe_key)
             return models.DummyInput()
         session.pending_method = type(request).__name__
@@ -271,6 +279,7 @@ class CwmpSessionHandler:
                 self._store.fail_task(
                     task.task_id, tasks.FAULT_INVALID_ARGUMENTS, str(err), False,
                 )
+                session.tasks_failed += 1
                 self._task_failed(session, task)
                 continue
             if not plan:
@@ -310,6 +319,7 @@ class CwmpSessionHandler:
             self._store.merge_parameters(session.cpe_key, result['values'])
             self._update_model(session)
         self._store.complete_task(task.task_id, result)
+        session.tasks_done += 1
         logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.cpe_key)
         if session.mode == MODE_CLAIMED:
             self._claimed.task_finished(task)
@@ -319,6 +329,8 @@ class CwmpSessionHandler:
     ) -> None:
         self._clear_task(session)
         failed = self._store.fail_task(task.task_id, code, text, retry)
+        if failed.status == TASK_FAILED:
+            session.tasks_failed += 1
         logging.warning(
             'Task %s (%s) on %s fault %d: %s; now %s',
             task.task_id, task.type, session.cpe_key, code, text, failed.status,
