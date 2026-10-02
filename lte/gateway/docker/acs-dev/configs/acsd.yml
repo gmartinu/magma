@@ -1,0 +1,28 @@
+---
+# Copyright 2026 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Dev override: there is no mtr0 in a container, so listen on every address
+# of the shared network namespace (127.0.0.1 and the container's eth0).
+cwmp_interface: eth0
+cwmp_address: 0.0.0.0
+cwmp_port: 48081
+cwmp_workers: 4
+
+# DEV ONLY: a fixed Digest credential so cpe-sim can authenticate. Never
+# ship it; the real acsd.yml leaves username/password empty. The override
+# replaces top-level keys, so the whole section is repeated here.
+cwmp_auth:
+  mode: required
+  realm: magma-acs
+  username: acs-dev-cpe
+  password: acs-dev-only-not-a-secret
+  nonce_ttl_secs: 300
