@@ -28,10 +28,14 @@ pytest_test(
         ORC8R_ROOT,
     ],
     deps = [
+        "//lte/gateway/python/magma/acsd/datamodel",
+        "//lte/gateway/python/magma/acsd:acsd_identity",
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:digest",
         "//lte/gateway/python/magma/acsd:session",
         "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
         "//lte/protos:mconfigs_python_proto",
         requirement("fakeredis"),
         requirement("protobuf"),
@@ -145,6 +149,7 @@ pytest_test(
         ORC8R_ROOT,
     ],
     deps = [
+        "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/acsd:store",
         "//lte/gateway/python/magma/acsd:tasks",
         "//lte/gateway/python/magma/tr069:models",
@@ -162,6 +167,7 @@ pytest_test(
         ORC8R_ROOT,
     ],
     deps = [
+        "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:server",
         "//lte/gateway/python/magma/acsd:session",
@@ -215,5 +221,23 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:server",
         "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/tr069:models",
+    ],
+)
+
+pytest_test(
+    name = "test_session_model",
+    size = "small",
+    srcs = ["test_session_model.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        "//lte/gateway/python/magma/acsd:tasks",
+        "//lte/gateway/python/magma/acsd/datamodel",
+        "//lte/gateway/python/magma/tr069:models",
+        requirement("fakeredis"),
     ],
 )

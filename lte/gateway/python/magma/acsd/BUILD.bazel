@@ -73,6 +73,7 @@ py_library(
     deps = [
         ":store",
         ":tasks",
+        "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/tr069:models",
         requirement("spyne"),
     ],
@@ -127,6 +128,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":store",
+        "//lte/gateway/python/magma/acsd/datamodel",
         "//lte/gateway/python/magma/tr069:models",
         requirement("spyne"),
     ],
