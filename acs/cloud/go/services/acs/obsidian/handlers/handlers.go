@@ -46,18 +46,19 @@ const (
 )
 
 type Handlers struct {
-	now func() time.Time
+	cpes CpeManagers
+	now  func() time.Time
 }
 
-func NewHandlers() *Handlers {
-	return &Handlers{now: time.Now}
+func NewHandlers(cpes CpeManagers) *Handlers {
+	return &Handlers{cpes: cpes, now: time.Now}
 }
 
 func (h *Handlers) GetHandlers() []obsidian.Handler {
-	return guardAll([]obsidian.Handler{
+	return guardAll(append([]obsidian.Handler{
 		{Path: CpesPath, Methods: obsidian.GET, HandlerFunc: h.listCpes},
 		{Path: CpePath, Methods: obsidian.GET, HandlerFunc: h.getCpe},
-	})
+	}, h.relayHandlers()...))
 }
 
 // requireFeature is the one gate every acs route passes; the entitlement

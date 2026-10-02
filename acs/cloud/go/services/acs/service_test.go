@@ -44,7 +44,7 @@ func init() {
 func TestACSServiceThroughObsidian(t *testing.T) {
 	configurator_test_init.StartTestService(t)
 	state_test_init.StartTestService(t)
-	test_init.StartTestService(t, handlers.NewHandlers())
+	test_init.StartTestService(t, handlers.NewHandlers(nil))
 
 	info, err := service303.Service303GetServiceInfo(acs_service.ServiceName)
 	require.NoError(t, err)

@@ -31,7 +31,7 @@ func main() {
 		glog.Fatalf("Error creating %s service: %s", acs_service.ServiceName, err)
 	}
 
-	obsidian.AttachHandlers(srv.EchoServer, handlers.NewHandlers().GetHandlers())
+	obsidian.AttachHandlers(srv.EchoServer, handlers.NewHandlers(handlers.NewSyncRPCCpeManagers()).GetHandlers())
 	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(acs_service.ServiceName))
 
 	err = srv.Run()

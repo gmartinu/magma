@@ -118,7 +118,7 @@ func titan(key, mode string, online bool) *cpestate.CpeView {
 
 func TestListCpes(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers()
+	h := NewHandlers(nil)
 
 	assert.Empty(t, listCpes(t, h, ""))
 
@@ -161,7 +161,7 @@ func TestListCpes(t *testing.T) {
 
 func TestListCpesStaleReportIsOffline(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers()
+	h := NewHandlers(nil)
 	reportCpe(t, "hw1", titan("IMSI001010000000001", cpestate.ModeCore, true))
 
 	h.now = func() time.Time { return time.Now().Add(stateStaleAfter + time.Minute) }
@@ -172,7 +172,7 @@ func TestListCpesStaleReportIsOffline(t *testing.T) {
 
 func TestGetCpe(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers()
+	h := NewHandlers(nil)
 	reportCpe(t, "hw2", titan("IMSI001010000000001", cpestate.ModeCore, true))
 
 	rec := serve(t, h, http.MethodGet, CpePath, "/magma/v1/acs/n1/cpes/IMSI001010000000001",
@@ -194,7 +194,7 @@ func TestRequireFeatureGuardsEveryRoute(t *testing.T) {
 	defer func() { requireFeature = orig }()
 	requireFeature = func(echo.Context) error { return echo.NewHTTPError(http.StatusForbidden, "acs not entitled") }
 
-	for _, hd := range NewHandlers().GetHandlers() {
+	for _, hd := range NewHandlers(nil).GetHandlers() {
 		c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
 		err := hd.HandlerFunc(c)
 		httpErr, ok := err.(*echo.HTTPError)
