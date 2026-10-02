@@ -30,6 +30,7 @@ TITAN = Spec(
     ouis=frozenset({OUI}),
     refresh={'Device.': ('Device.DeviceInfo.', 'Device.X_TITAN.')},
     quirks=Quirks(max_gpv_names=1),
+    base=GENERIC,
 )
 
 
@@ -63,6 +64,10 @@ def _inform(oui='', **params):
 
 def _gpv_response(**values):
     return models.GetParameterValuesResponse(ParameterList=_params(values))
+
+
+def _fault(code, text='fault'):
+    return models.Fault(FaultCode=code, FaultString=text)
 
 
 class _Base(unittest.TestCase):
@@ -123,3 +128,90 @@ class HandlerSelectionTest(_Base):
         self.assertEqual(
             first.ParameterNames.string, [GENERIC.refresh_paths('Device.')[0]],
         )
+
+
+class BrokenHandler:
+    name = 'broken'
+    quirks = Quirks()
+
+    def match(self, info):
+        return 100
+
+    def refresh_paths(self, root):
+        return ()
+
+    def normalize(self, root, params):
+        raise RuntimeError('bad table')
+
+
+class ModelTest(_Base):
+    def model(self):
+        return self.store.get_model(IMSI).model
+
+    def test_inform_stores_the_model(self):
+        self.send(_inform(**{
+            'Device.DeviceInfo.SoftwareVersion': '1.2',
+            'Device.IP.Interface.1.IPv4Address.1.IPAddress': '192.168.1.1',
+        }))
+        cpe = self.store.get_model(IMSI)
+        self.assertEqual(cpe.handler, GENERIC.name)
+        self.assertEqual(cpe.model, {
+            'root': 'Device.',
+            'identity': {
+                'manufacturer': 'Acme', 'product_class': 'CPE',
+                'serial_number': 'SIM0001',
+            },
+            'firmware': {'software_version': '1.2'},
+            'wan': {'ipv4_address': IP},
+        })
+
+    def test_parameters_beat_the_device_id(self):
+        self.send(_inform(**{'Device.DeviceInfo.Manufacturer': 'Real'}))
+        self.assertEqual(self.model()['identity']['manufacturer'], 'Real')
+
+    def test_refresh_rebuilds_the_model_and_keeps_the_identity(self):
+        task = self.enqueue(tasks.REFRESH)
+        self.send(_inform(oui=OUI, **{'Device.DeviceInfo.UpTime': '5'}))
+        self.send(models.DummyInput())
+        self.send(_gpv_response(**{
+            'Device.DeviceInfo.UpTime': '60',
+            'Device.Cellular.Interface.1.RSSI': '-70',
+        }))
+        self.send(_fault(9005, 'Invalid parameter name'))
+        self.assertEqual(self.store.get_task(task.task_id).status, TASK_DONE)
+        cpe = self.store.get_model(IMSI)
+        self.assertEqual(cpe.handler, 'titan')
+        self.assertEqual(cpe.model['uptime_sec'], 60)
+        self.assertEqual(cpe.model['cellular'], {'rssi': -70.0})
+        self.assertEqual(cpe.model['identity']['oui'], OUI)
+        self.assertEqual(cpe.model['wan'], {'ipv4_address': IP})
+
+    def test_task_without_values_leaves_the_model(self):
+        self.enqueue(tasks.REBOOT)
+        self.send(_inform())
+        before = self.store.get_model(IMSI)
+        self.send(models.DummyInput())
+        self.send(models.RebootResponse())
+        self.assertEqual(self.store.get_model(IMSI), before)
+
+    def test_wan_address_follows_the_source_family(self):
+        self.send(_inform(), source_ip='::ffff:10.1.0.9')
+        self.assertEqual(self.model()['wan'], {'ipv4_address': '10.1.0.9'})
+        self.send(_inform(), source_ip='2001:db8::5')
+        self.assertEqual(self.model()['wan'], {'ipv6_address': '2001:db8::5'})
+
+    def test_source_ip_overrides_the_handler_guess(self):
+        self.send(_inform(**{
+            'Device.IP.Interface.2.IPv4Address.1.IPAddress': '100.64.0.7',
+        }))
+        self.assertEqual(self.model()['wan'], {'ipv4_address': IP})
+
+    def test_normalize_failure_keeps_the_session(self):
+        self.handler = CwmpSessionHandler(
+            lambda ip, inform: IMSI, store=self.store,
+            registry=Registry([BrokenHandler()]),
+        )
+        with self.assertLogs(level='ERROR'):
+            response = self.send(_inform())
+        self.assertIsInstance(response, models.InformResponse)
+        self.assertIsNone(self.store.get_model(IMSI))

@@ -224,3 +224,14 @@ class ParametersAndInformsTest(StoreTest):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModelTest(StoreTest):
+    def test_put_and_get_survive_a_restart(self):
+        self.assertIsNone(self.store.get_model(IMSI))
+        self.store.put_model(IMSI, 'generic', {'root': 'Device.'})
+        cpe = AcsStore(self.redis, clock=self.clock).get_model(IMSI)
+        self.assertEqual(
+            (cpe.imsi, cpe.handler, cpe.model, cpe.updated),
+            (IMSI, 'generic', {'root': 'Device.'}, self.clock.now),
+        )
