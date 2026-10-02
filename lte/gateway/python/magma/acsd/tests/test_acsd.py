@@ -31,6 +31,7 @@ from magma.acsd.config import (
     CwmpBind,
     get_cwmp_auth,
     get_cwmp_bind,
+    get_cwmp_wan,
     get_cwmp_workers,
 )
 from magma.acsd.datamodel import DEFAULT_REGISTRY
@@ -220,6 +221,10 @@ class ShippedConfigTest(unittest.TestCase):
         self.assertEqual(auth.mode, AUTH_REQUIRED)
         # No password ships in the repo; the lab sets it in the override.
         self.assertFalse(auth.has_credential)
+        wan = get_cwmp_wan(cfg, auth)
+        self.assertFalse(wan.enabled)
+        self.assertEqual(wan.bind, CwmpBind('eth0', '0.0.0.0', 48443))
+        self.assertTrue(wan.cert_path and wan.key_path)
 
     def test_gateway_mconfig_entry(self):
         with open(os.path.join(CONFIG_DIR, 'gateway.mconfig')) as f:
