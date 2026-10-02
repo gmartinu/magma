@@ -309,6 +309,9 @@ class AccessControlController(MagmaController):
         if cr_port is None:
             return matches
         # SYN-ACK answering acsd's SYN, then any segment without SYN.
+        # tcp_flags, not tcp_flags_nxm: ryu sorts match fields by OXM
+        # type, so the Nicira field would land before eth_type/ip_proto
+        # and OVS rejects the flow with OFPBMC_BAD_PREREQ.
         for flags, mask in (
             (_TCP_SYN | _TCP_ACK, _TCP_SYN | _TCP_ACK),
             (0, _TCP_SYN),
@@ -320,7 +323,7 @@ class AccessControlController(MagmaController):
                     ipv4_dst=ipv4_dst,
                     ip_proto=IPPROTO_TCP,
                     tcp_src=cr_port,
-                    tcp_flags_nxm=(flags, mask),
+                    tcp_flags=(flags, mask),
                 ),
             )
         return matches
