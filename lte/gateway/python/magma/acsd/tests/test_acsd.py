@@ -11,15 +11,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import http.client
 import json
 import os
 import unittest
+from unittest import mock
 
 import yaml
 from google.protobuf import json_format
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd import main
-from magma.acsd.config import DEFAULT_CWMP_PORT, CwmpBind, get_cwmp_bind
+from magma.acsd.config import (
+    DEFAULT_CWMP_PORT,
+    DEFAULT_CWMP_WORKERS,
+    CwmpBind,
+    get_cwmp_bind,
+    get_cwmp_workers,
+)
+from magma.acsd.session import CwmpSessionHandler
 
 MAGMA_ROOT = os.environ.get('MAGMA_ROOT')
 CONFIG_DIR = os.path.join(MAGMA_ROOT or '', 'lte/gateway/configs')
@@ -42,6 +51,46 @@ class CwmpBindTest(unittest.TestCase):
         self.assertEqual(bind, CwmpBind('mtr0', '10.1.0.1', DEFAULT_CWMP_PORT))
 
 
+class CwmpWorkersTest(unittest.TestCase):
+    def test_default(self):
+        self.assertEqual(get_cwmp_workers({}), DEFAULT_CWMP_WORKERS)
+
+    def test_from_yml(self):
+        self.assertEqual(get_cwmp_workers({'cwmp_workers': 4}), 4)
+
+    def test_never_below_one(self):
+        self.assertEqual(get_cwmp_workers({'cwmp_workers': 0}), 1)
+
+
+class CwmpListenerWiringTest(unittest.TestCase):
+    def test_listener_answers_empty_post(self):
+        thread = main.start_cwmp_listener(
+            CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(), 2,
+        )
+        server = thread.server
+        try:
+            conn = http.client.HTTPConnection(
+                '127.0.0.1', server.server_address[1], timeout=5,
+            )
+            conn.request('POST', '/', b'')
+            self.assertEqual(conn.getresponse().status, 204)
+            conn.close()
+        finally:
+            with mock.patch.object(main._thread, 'interrupt_main'):
+                server.shutdown()
+                thread.join(5)
+            server.server_close()
+
+    def test_listener_exit_interrupts_main(self):
+        with mock.patch.object(main._thread, 'interrupt_main') as interrupt, \
+                mock.patch.object(main, 'make_cwmp_server') as make_server:
+            make_server.return_value.serve_forever.side_effect = OSError
+            main.start_cwmp_listener(
+                CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(), 1,
+            ).join(5)
+        interrupt.assert_called_once_with()
+
+
 class SkeletonTest(unittest.TestCase):
     def test_no_operational_states_yet(self):
         self.assertEqual(main._get_operational_states(), [])
@@ -57,6 +106,7 @@ class ShippedConfigTest(unittest.TestCase):
             cfg = yaml.safe_load(f)
         bind = get_cwmp_bind(cfg, mconfigs_pb2.AcsD())
         self.assertEqual(bind, CwmpBind('mtr0', '10.1.0.1', 48081))
+        self.assertEqual(get_cwmp_workers(cfg), 16)
 
     def test_gateway_mconfig_entry(self):
         with open(os.path.join(CONFIG_DIR, 'gateway.mconfig')) as f:
