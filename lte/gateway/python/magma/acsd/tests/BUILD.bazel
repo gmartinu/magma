@@ -171,3 +171,22 @@ pytest_test(
         requirement("fakeredis"),
     ],
 )
+
+pytest_test(
+    name = "test_digest",
+    size = "small",
+    srcs = ["test_digest.py"],
+    data = glob(["fixtures/*.xml"]),
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:digest",
+        "//lte/gateway/python/magma/acsd:server",
+        "//lte/gateway/python/magma/acsd:session",
+        "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
+    ],
+)
