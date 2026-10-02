@@ -41,14 +41,28 @@ _HASHES: Dict[str, Callable] = {
 }
 
 
+class Ha1(str):
+    """
+    A stored MD5 HA1, md5(username:realm:password), returned by a
+    CredentialProvider in place of the password so acsd never has to keep
+    per-CPE passwords. It is password-equivalent for Digest, so it is a
+    secret all the same.
+    """
+
+
+def ha1_of(username: str, realm: str, password: str) -> Ha1:
+    a1 = '%s:%s:%s' % (username, realm, password)
+    return Ha1(hashlib.md5(a1.encode()).hexdigest())
+
+
 class CredentialProvider(Protocol):
     """Where acsd finds the password a CPE should authenticate with."""
 
     def lookup(self, username: str, source_ip: str) -> Optional[str]:
         """
-        The password of `username` for the CPE at `source_ip`, or None to
-        refuse it. Per-CPE providers can resolve the source IP to the IMSI
-        and accept only the username bound to it.
+        The password (or its Ha1) of `username` for the CPE at
+        `source_ip`, or None to refuse it. Per-CPE providers can resolve
+        the source IP to the IMSI and accept only the username bound to it.
         """
 
 
@@ -178,8 +192,11 @@ class DigestAuthenticator:
         password = self._credentials.lookup(username, source_ip)
         if password is None:
             return AuthResult(username, 'unknown username')
+        algorithm = p.get('algorithm') or 'MD5'
+        if isinstance(password, Ha1) and algorithm.upper() != 'MD5':
+            return AuthResult(username, 'stored credential needs MD5')
         expected = digest_response(
-            p.get('algorithm') or 'MD5', username, self.realm, password,
+            algorithm, username, self.realm, password,
             method, p['uri'], p['nonce'], p.get('nc'), p.get('cnonce'),
             p.get('qop'),
         )
@@ -222,13 +239,19 @@ def digest_response(
     cnonce: Optional[str] = None,
     qop: Optional[str] = None,
 ) -> str:
-    """The Digest `response` value a client sends (RFC 7616 section 3.4.1)."""
+    """
+    The Digest `response` value a client sends (RFC 7616 section 3.4.1).
+    `password` may be an Ha1, with MD5.
+    """
     new = _HASHES[algorithm.upper()]
 
     def h(s: str) -> str:
         return new(s.encode()).hexdigest()
 
-    ha1 = h('%s:%s:%s' % (username, realm, password))
+    if isinstance(password, Ha1):
+        ha1 = str(password)
+    else:
+        ha1 = h('%s:%s:%s' % (username, realm, password))
     ha2 = h('%s:%s' % (method, uri))
     if qop:
         return h(':'.join((ha1, nonce, nc or '', cnonce or '', qop, ha2)))
