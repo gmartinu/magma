@@ -19,7 +19,9 @@ from magma.acsd.datamodel.registry import (
     DEFAULT_REGISTRY,
     Registry,
     detect_root,
+    device_id_identity,
     device_info,
+    fill_identity,
     normalize_inform,
     params_of,
 )
@@ -36,6 +38,7 @@ from magma.acsd.datamodel.spec import (
 __all__ = [
     'DEFAULT_REGISTRY', 'GENERIC', 'GENERIC_HANDLER_NAME', 'ROOT_TR098',
     'ROOT_TR181', 'DeviceInfo', 'Field', 'FieldPaths', 'Handler', 'Model',
-    'Quirks', 'Registry', 'Spec', 'detect_root', 'device_info',
-    'gpv_batches', 'normalize_inform', 'params_of', 'paths',
+    'Quirks', 'Registry', 'Spec', 'detect_root', 'device_id_identity',
+    'device_info', 'fill_identity', 'gpv_batches', 'normalize_inform',
+    'params_of', 'paths',
 ]

@@ -15,6 +15,7 @@ import unittest
 
 import fakeredis
 from magma.acsd import tasks
+from magma.acsd.datamodel import GENERIC, Quirks, Spec
 from magma.acsd.store import AcsStore, Task
 from magma.tr069 import models
 
@@ -90,16 +91,32 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(request.ParameterNames.string, ['A', 'B'])
         self.assertEqual(request.ParameterNames.arrayType, 'xsd:string[2]')
 
-    def test_refresh_reads_one_subtree_per_request(self):
+    def test_refresh_reads_the_generic_handler_paths(self):
         plan = tasks.plan(_task(tasks.REFRESH), 'Device.')
         self.assertEqual(
             [r.ParameterNames.string for r in plan],
-            [['Device.DeviceInfo.'], ['Device.Cellular.']],
+            [[p] for p in GENERIC.refresh_paths('Device.')],
         )
         plan = tasks.plan(_task(tasks.REFRESH), 'InternetGatewayDevice.')
-        self.assertEqual(len(plan), 1)
-        plan = tasks.plan(_task(tasks.REFRESH), 'Device.', lambda root: [root])
-        self.assertEqual(plan[0].ParameterNames.string, ['Device.'])
+        self.assertEqual(len(plan), len(GENERIC.refresh_paths('InternetGatewayDevice.')))
+        handler = Spec(name='t', refresh={'Device.': ('Device.',)})
+        plan = tasks.plan(_task(tasks.REFRESH), 'Device.', handler)
+        self.assertEqual([r.ParameterNames.string for r in plan], [['Device.']])
+
+    def test_get_parameter_values_capped_by_the_handler(self):
+        handler = Spec(name='t', quirks=Quirks(max_gpv_names=2))
+        plan = tasks.plan(_task(tasks.GET_PARAMETER_VALUES, parameter_names=['A', 'B', 'C']), 'Device.', handler)
+        self.assertEqual([r.ParameterNames.string for r in plan], [['A', 'B'], ['C']])
+        self.assertEqual([r.ParameterNames.arrayType for r in plan], ['xsd:string[2]', 'xsd:string[1]'])
+
+    def test_refresh_reads_subtrees_alone_and_batches_leaves(self):
+        handler = Spec(name='t', quirks=Quirks(max_gpv_names=2))
+        plan = tasks.plan(_task(tasks.REFRESH, parameter_names=['A', 'X.', 'B', 'C']), 'Device.', handler)
+        self.assertEqual([r.ParameterNames.string for r in plan], [['X.'], ['A', 'B'], ['C']])
+
+    def test_refresh_without_paths_for_the_root_is_empty(self):
+        handler = Spec(name='t', refresh={'Device.': ('Device.',)})
+        self.assertEqual(tasks.plan(_task(tasks.REFRESH), 'InternetGatewayDevice.', handler), [])
 
     def test_set_parameter_values(self):
         request, = tasks.plan(

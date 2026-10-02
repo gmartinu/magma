@@ -11,6 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import ipaddress
 import logging
 import threading
 import time
@@ -18,6 +19,18 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from magma.acsd import tasks
+from magma.acsd.datamodel import (
+    DEFAULT_REGISTRY,
+    ROOT_TR181,
+    Field,
+    Handler,
+    Model,
+    Registry,
+    detect_root,
+    device_id_identity,
+    device_info,
+    fill_identity,
+)
 from magma.acsd.store import TASK_IN_PROGRESS, AcsStore, Session, Task
 from magma.tr069 import models
 from spyne.model.complex import ComplexModelBase
@@ -61,12 +74,12 @@ class CwmpSessionHandler:
         identify: IdentifyFn = accept_all,
         *,
         store: AcsStore,
-        refresh_paths: tasks.RefreshPathsFn = tasks.default_refresh_paths,
+        registry: Registry = DEFAULT_REGISTRY,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._identify = identify
         self._store = store
-        self._refresh_paths = refresh_paths
+        self._registry = registry
         self._clock = clock
         self._reap_lock = threading.Lock()
         self._next_reap = 0.0
@@ -125,21 +138,24 @@ class CwmpSessionHandler:
         self._store.end_session(source_ip, 'CPE started a new session')
         self._store.end_imsi_sessions(identity, 'CPE started a new session')
         values = _inform_values(inform)
-        self._store.put_session(
-            Session(
-                session_id=uuid.uuid4().hex,
-                imsi=identity,
-                source_ip=source_ip,
-                root=_root_of(values),
-                created=time.time(),
-            ),
+        handler = self._registry.select(device_info(inform, values))
+        session = Session(
+            session_id=uuid.uuid4().hex,
+            imsi=identity,
+            source_ip=source_ip,
+            root=detect_root(values) or ROOT_TR181,
+            model_handler=handler.name,
+            created=time.time(),
         )
+        self._store.put_session(session)
         self._store.count_inform(identity)
         if values:
             self._store.merge_parameters(identity, values)
+        self._update_model(session, device_id_identity(inform))
         logging.info(
-            'Inform from %s (serial %s, identity %s, %d tasks pending)',
-            source_ip, serial, identity, self._store.pending_count(identity),
+            'Inform from %s (serial %s, identity %s, handler %s, '
+            '%d tasks pending)', source_ip, serial, identity, handler.name,
+            self._store.pending_count(identity),
         )
         return models.InformResponse(MaxEnvelopes=1)
 
@@ -244,11 +260,15 @@ class CwmpSessionHandler:
         return task
 
     def _plan(self, task: Task, session: Session) -> List[ComplexModelBase]:
-        return tasks.plan(task, session.root, self._refresh_paths)
+        return tasks.plan(task, session.root, self._handler(session))
+
+    def _handler(self, session: Session) -> Handler:
+        return self._registry.get(session.model_handler)
 
     def _finish(self, session: Session, task: Task, result: Dict[str, Any]) -> None:
         if result.get('values'):
             self._store.merge_parameters(session.imsi, result['values'])
+            self._update_model(session)
         self._store.complete_task(task.task_id, result)
         logging.info('Task %s (%s) on %s done', task.task_id, task.type, session.imsi)
 
@@ -261,6 +281,31 @@ class CwmpSessionHandler:
             'Task %s (%s) on %s fault %d: %s; now %s',
             task.task_id, task.type, session.imsi, code, text, failed.status,
         )
+
+    def _update_model(
+        self, session: Session, identity: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """
+        Rebuild the CPE's normalized model from its whole parameter
+        snapshot. `identity` is what the Inform DeviceId says; without it the
+        identity of the stored model fills the fields the snapshot lacks.
+        """
+        handler = self._handler(session)
+        snapshot = self._store.get_parameters(session.imsi)
+        try:
+            model = handler.normalize(session.root, snapshot.values)
+        except Exception:  # pylint: disable=broad-except
+            # A broken vendor table must not cost the CPE its session.
+            logging.exception(
+                'Handler %s cannot normalize %s', handler.name, session.imsi,
+            )
+            return
+        if identity is None:
+            stored = self._store.get_model(session.imsi)
+            identity = stored.model.get('identity', {}) if stored else {}
+        fill_identity(model, identity)
+        _set_wan_address(model, session.source_ip)
+        self._store.put_model(session.imsi, handler.name, model.to_dict())
 
     @staticmethod
     def _clear_task(session: Session) -> None:
@@ -294,7 +339,18 @@ def _inform_values(inform: models.Inform) -> Dict[str, str]:
     return values
 
 
-def _root_of(values: Dict[str, str]) -> str:
-    if any(name.startswith('InternetGatewayDevice.') for name in values):
-        return 'InternetGatewayDevice.'
-    return 'Device.'
+def _set_wan_address(model: Model, source_ip: str) -> None:
+    """
+    The CPE reaches acsd from its WAN address, so that is the one to show,
+    not the handler's pick among the IP.Interface entries.
+    """
+    try:
+        address = ipaddress.ip_address(source_ip)
+    except ValueError:
+        return
+    if address.version == 6 and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if address.version == 4:
+        model.set(Field.WAN_IPV4, str(address))
+    else:
+        model.set(Field.WAN_IPV6, str(address))

@@ -75,6 +75,8 @@ class Session:
     source_ip: str
     # Data model root from the Inform: 'Device.' or 'InternetGatewayDevice.'.
     root: str = 'Device.'
+    # Name of the datamodel handler picked from the Inform DeviceId.
+    model_handler: str = ''
     pending_task_id: str = ''
     pending_method: str = ''
     task_step: int = 0
@@ -86,6 +88,15 @@ class Session:
 class ParameterSnapshot:
     imsi: str
     values: Dict[str, str] = field(default_factory=dict)
+    updated: float = 0.0
+
+
+@dataclass
+class CpeModel:
+    """The normalized model of a CPE (datamodel.Model.to_dict())."""
+    imsi: str
+    handler: str = ''
+    model: Dict[str, Any] = field(default_factory=dict)
     updated: float = 0.0
 
 
@@ -108,8 +119,9 @@ class ReapResult:
 class AcsStore:
     """
     acsd state in Redis: open sessions, the per-IMSI task queue, the last
-    parameter snapshot and inform counters. Task semantics follow the Go
-    ACSStorage of the cloud ACS (claim, retry, fail, timeout).
+    parameter snapshot, the normalized model and inform counters. Task
+    semantics follow the Go ACSStorage of the cloud ACS (claim, retry,
+    fail, timeout).
 
     acsd is the only writer of these keys, so compound updates are made
     atomic with a process lock rather than Redis transactions; every single
@@ -137,6 +149,7 @@ class AcsStore:
         # IMSI -> task IDs in creation order, which is the run order.
         self._queues = hash_dict('queues')
         self._params = hash_dict('params')
+        self._models = hash_dict('models')
         self._informs = hash_dict('informs')
 
     # Sessions
@@ -328,6 +341,17 @@ class AcsStore:
     def get_parameters(self, imsi: str) -> ParameterSnapshot:
         raw = self._params.get(imsi)
         return ParameterSnapshot(**raw) if raw else ParameterSnapshot(imsi)
+
+    def put_model(
+        self, imsi: str, handler: str, model: Dict[str, Any],
+    ) -> CpeModel:
+        cpe = CpeModel(imsi, handler, model, self._clock())
+        self._models[imsi] = asdict(cpe)
+        return cpe
+
+    def get_model(self, imsi: str) -> Optional[CpeModel]:
+        raw = self._models.get(imsi)
+        return CpeModel(**raw) if raw else None
 
     def count_inform(
         self, imsi: str, window_sec: float = INFORM_WINDOW_SEC,
