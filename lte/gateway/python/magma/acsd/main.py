@@ -33,6 +33,7 @@ from magma.acsd.digest import (
     StaticCredentialProvider,
 )
 from magma.acsd.identity import SessionIdentifier
+from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
 from magma.acsd.store import AcsStore
@@ -134,8 +135,9 @@ def main():
         bind.interface, bind.address, bind.port, workers,
     )
 
-    views = CpeViews(store, service.mconfig.periodic_inform_interval)
+    views = CpeViews(handler.store, service.mconfig.periodic_inform_interval)
     service.register_operational_states_callback(views.operational_states)
+    CpeManagerRpcServicer(handler.store, views).add_to_server(service.rpc_server)
     schedule_reaper(service.loop, store)
 
     # Run the service loop
