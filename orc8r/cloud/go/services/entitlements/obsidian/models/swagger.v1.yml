@@ -146,7 +146,6 @@ definitions:
       enabled:
         description: False switches the feature off for the tenant
         type: boolean
-        x-nullable: false
       not_after:
         description: Expiry; omitted means no expiry
         type: string
