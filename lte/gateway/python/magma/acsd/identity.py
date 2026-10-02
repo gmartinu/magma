@@ -22,12 +22,13 @@ CPE but never lets an unidentified one in.
 import logging
 from typing import Optional
 
+from magma.acsd.bindings import SerialBinder
 from magma.acsd.mobilityd_client import MobilitydClient, MobilitydUnavailable
 
 
 class CpeIdentifier:
     """
-    The `identify(source_ip) -> imsi | None` hook of the CWMP listener.
+    Resolves `source_ip -> imsi | None`; SessionIdentifier calls it.
 
     Call it once per session, at session start, and keep the result for the
     session: one mobilityd RPC per session, and the IMSI cannot change under
@@ -61,4 +62,37 @@ class CpeIdentifier:
         logging.info(
             'acsd identity: source_ip=%s imsi=%s', source_ip, imsi,
         )
+        return imsi
+
+
+class SessionIdentifier:
+    """
+    The listener's IdentifyFn: resolves the IMSI behind the session, binds
+    the Inform serial to it, and returns the IMSI as the session identity.
+    None refuses the session.
+    """
+
+    def __init__(
+        self,
+        identifier: Optional[CpeIdentifier] = None,
+        binder: Optional[SerialBinder] = None,
+    ):
+        self._identifier = identifier or CpeIdentifier()
+        self._binder = binder or SerialBinder()
+
+    def __call__(self, source_ip: str, inform) -> Optional[str]:
+        imsi = self._identifier(source_ip)
+        if imsi is None:
+            return None
+        device_id = getattr(inform, 'DeviceId', None)
+        serial = getattr(device_id, 'SerialNumber', None)
+        if not serial:
+            # DeviceId.SerialNumber is mandatory in an Inform; without it
+            # there is nothing to bind, so the claim cannot be checked.
+            logging.warning(
+                'acsd identity: refusing session, source_ip=%s imsi=%s '
+                'Inform has no serial', source_ip, imsi,
+            )
+            return None
+        self._binder.bind(imsi, serial)
         return imsi
