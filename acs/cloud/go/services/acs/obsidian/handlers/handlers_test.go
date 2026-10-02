@@ -44,7 +44,11 @@ import (
 // not enforced, and registers g1/hw1 and g2/hw2 in n1, so both gateways
 // can report state.
 func setupNetwork(t *testing.T) {
-	entitlements_test_init.StartTestService(t, entitlements_servicers.Config{Enforce: false}, nil)
+	setupNetworkWithEntitlements(t, entitlements_servicers.Config{Enforce: false})
+}
+
+func setupNetworkWithEntitlements(t *testing.T, cfg entitlements_servicers.Config) {
+	entitlements_test_init.StartTestService(t, cfg, nil)
 	configurator_test_init.StartTestService(t)
 	device_test_init.StartTestService(t)
 	state_test_init.StartTestService(t)
