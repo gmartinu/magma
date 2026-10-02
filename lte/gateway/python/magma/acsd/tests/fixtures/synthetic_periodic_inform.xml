@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">42</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>Synthetic CPE</Manufacturer>
+        <OUI>00C0FF</OUI>
+        <ProductClass>FWA5G</ProductClass>
+        <SerialNumber>SYN0000042</SerialNumber>
+      </DeviceId>
+      <Event SOAP-ENC:arrayType="cwmp:EventStruct[2]">
+        <EventStruct><EventCode>2 PERIODIC</EventCode><CommandKey></CommandKey></EventStruct>
+        <EventStruct><EventCode>4 VALUE CHANGE</EventCode><CommandKey></CommandKey></EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-10-02T09:30:00+00:00</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[4]">
+        <ParameterValueStruct><Name>Device.RootDataModelVersion</Name><Value xsi:type="xsd:string">2.12</Value></ParameterValueStruct>
+        <ParameterValueStruct><Name>Device.DeviceInfo.SoftwareVersion</Name><Value xsi:type="xsd:string">1.2.3</Value></ParameterValueStruct>
+        <ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestURL</Name><Value xsi:type="xsd:string">http://192.168.128.12:7547/cr</Value></ParameterValueStruct>
+        <ParameterValueStruct><Name>Device.ManagementServer.PeriodicInformInterval</Name><Value xsi:type="xsd:unsignedInt">300</Value></ParameterValueStruct>
+      </ParameterList>
+    </cwmp:Inform>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
