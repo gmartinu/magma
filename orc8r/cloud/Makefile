@@ -16,7 +16,8 @@ MAGMA_MODULES := \
 	$(MAGMA_ROOT)/lte \
 	$(MAGMA_ROOT)/feg \
 	$(MAGMA_ROOT)/cwf \
-	$(MAGMA_ROOT)/dp
+	$(MAGMA_ROOT)/dp \
+	$(MAGMA_ROOT)/acs
 $(warning MAGMA_MODULES is undefined, using default: $(MAGMA_MODULES))
 endif
 
