@@ -39,12 +39,13 @@ from magma.acsd.digest import (
     NonceStore,
     StaticCredentialProvider,
 )
+from magma.acsd.events import AcsEvents, EventEmitter
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
 from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
-from magma.acsd.store import AcsStore
+from magma.acsd.store import AcsStore, StoreListeners
 from magma.common.redis.client import get_default_client
 from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
@@ -192,7 +193,10 @@ def main():
     workers = get_cwmp_workers(config)
     client = get_default_client()
     metrics = AcsMetrics(get_cpe_kpi_config(config))
-    store = AcsStore(client, listener=metrics)
+    events = AcsEvents(EventEmitter().start())
+    store = AcsStore(client, listener=StoreListeners(metrics, events))
+    views = CpeViews(store, service.mconfig.periodic_inform_interval)
+    events.mode_of = views.mode_of
     # A new process cannot continue the HTTP exchanges of the last one.
     requeued = store.end_all_sessions('acsd restarted')
     if requeued:
@@ -216,7 +220,6 @@ def main():
         bind.interface, bind.address, bind.port, workers,
     )
 
-    views = CpeViews(handler.store, service.mconfig.periodic_inform_interval)
     service.register_operational_states_callback(views.operational_states)
     CpeManagerRpcServicer(handler.store, views).add_to_server(service.rpc_server)
     schedule_reaper(

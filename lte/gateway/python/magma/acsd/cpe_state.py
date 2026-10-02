@@ -161,6 +161,14 @@ class CpeViews:
             if v is not None and (max_age_sec <= 0 or now - v.last_inform <= max_age_sec)
         ]
 
+    def mode_of(self, cpe_key: str) -> str:
+        """The mode of one CPE, as get() reports it, without the rest."""
+        open_mode = next(
+            (s.mode for s in self._store.list_sessions() if s.cpe_key == cpe_key),
+            None,
+        )
+        return cpe_mode(open_mode, self._store.get_last_session(cpe_key))
+
     def _open_modes(self) -> Dict[str, str]:
         return {s.cpe_key: s.mode for s in self._store.list_sessions()}
 
