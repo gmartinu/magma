@@ -23,6 +23,7 @@ var (
 	// NetworkSerdes contains the package's configurator network config serdes
 	NetworkSerdes = serde.NewRegistry(
 		configurator.NewNetworkConfigSerde(lte.CellularNetworkConfigType, &NetworkCellularConfigs{}),
+		configurator.NewNetworkConfigSerde(lte.AcsNetworkConfigType, &NetworkAcsConfigs{}),
 	)
 	// EntitySerdes contains the package's configurator network entity serdes
 	EntitySerdes = serde.NewRegistry(

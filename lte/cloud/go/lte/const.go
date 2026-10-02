@@ -61,6 +61,8 @@ const (
 	// in configurator.
 	CellularNetworkConfigType   = "cellular_network"
 	NetworkSubscriberConfigType = "network_subscriber_config"
+	// AcsNetworkConfigType holds the network's acsd config.
+	AcsNetworkConfigType = "acs_network"
 
 	// APNEntityType etc. are configurator network entity types.
 	APNEntityType                     = "apn"
