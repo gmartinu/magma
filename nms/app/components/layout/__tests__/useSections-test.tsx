@@ -100,3 +100,23 @@ describe.each([CWF, FEG, LTE, FEG_LTE])('Should render', networkType => {
     expect(paths).toStrictEqual(testCase.sections);
   });
 });
+
+it('adds the ACS section to LTE networks when the organization has acs', async () => {
+  window.CONFIG = {
+    appData: ({enabledFeatures: ['acs']} as unknown) as EmbeddedData,
+  };
+  mockAPI(MagmaAPI.networks, 'networksNetworkIdTypeGet', LTE);
+  const {result, waitForNextUpdate} = renderHook(() => useSections(), {
+    wrapper,
+  });
+  await act(async () => {
+    await waitForNextUpdate();
+  });
+  expect(result.current[1].map(r => r.path)).toStrictEqual([
+    ...testCases.lte.sections,
+    'acs',
+  ]);
+  window.CONFIG = {
+    appData: ({enabledFeatures: []} as unknown) as EmbeddedData,
+  };
+});
