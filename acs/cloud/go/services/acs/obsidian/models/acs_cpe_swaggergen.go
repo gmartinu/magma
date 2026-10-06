@@ -20,13 +20,17 @@ import (
 // swagger:model acs_cpe
 type AcsCpe struct {
 
+	// Other gateways that report this cpe_key online too: a claim ID used on two AGWs, or a CPE that just moved to gateway_id
+	//
+	ConflictingGatewayIds []string `json:"conflicting_gateway_ids"`
+
 	// cpe key
 	// Example: IMSI001010000000001
 	// Required: true
 	// Min Length: 1
 	CpeKey string `json:"cpe_key"`
 
-	// Gateway whose acsd last reported the CPE; empty if unregistered
+	// Gateway serving the CPE (the newest Inform); empty if unregistered
 	// Required: true
 	GatewayID string `json:"gateway_id"`
 
@@ -58,6 +62,10 @@ type AcsCpe struct {
 	// ModelName the CPE reported, from the normalized model
 	ModelName string `json:"model_name,omitempty"`
 
+	// When the next periodic Inform is due; in the past when the CPE is late, absent before its first Inform
+	// Format: date-time
+	NextInform *strfmt.DateTime `json:"next_inform,omitempty"`
+
 	// Whether the last Inform is at most two periodic inform intervals old, as acsd computed it; false when the AGW report is stale
 	//
 	// Required: true
@@ -73,6 +81,14 @@ type AcsCpe struct {
 	// product class
 	// Example: Titan4000
 	ProductClass string `json:"product_class,omitempty"`
+
+	// How queued tasks get to the CPE: connection_request (acsd asks the CPE to open a session, the tasks run within seconds) or next_inform (they wait for next_inform); empty when acsd does not say
+	//
+	Reach string `json:"reach,omitempty"`
+
+	// Why reach is next_inform: behind_nat, no_url, no_credential, disabled, connection_request_failed or frozen
+	//
+	ReachReason string `json:"reach_reason,omitempty"`
 
 	// When the AGW last reported the CPE's state
 	// Required: true
@@ -108,6 +124,10 @@ func (m *AcsCpe) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := m.validateMode(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateNextInform(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -215,6 +235,18 @@ func (m *AcsCpe) validateMode(formats strfmt.Registry) error {
 
 	// value enum
 	if err := m.validateModeEnum("mode", "body", m.Mode); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *AcsCpe) validateNextInform(formats strfmt.Registry) error {
+	if swag.IsZero(m.NextInform) { // not required
+		return nil
+	}
+
+	if err := validate.FormatOf("next_inform", "body", "date-time", m.NextInform.String(), formats); err != nil {
 		return err
 	}
 
