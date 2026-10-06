@@ -21,6 +21,9 @@ from magma.acsd.claims import (
     cpe_key_of,
     is_claim_key,
 )
+from magma.acsd.credentials import CredentialStore
+from magma.acsd.reach import Reacher
+from magma.acsd.store import AcsStore, Session
 
 
 class ClaimRegistryTest(unittest.TestCase):
@@ -94,6 +97,78 @@ class ClaimRegistryTest(unittest.TestCase):
         self.assertEqual(
             sorted(c.claim_id for c in self.claims.list()), ['keep', 'moved', 'new'],
         )
+
+
+
+class ForgetTest(unittest.TestCase):
+    """A claim id that stops naming its device drops its CPE's records."""
+
+    def setUp(self):
+        self.redis = fakeredis.FakeStrictRedis()
+        self.claims = ClaimRegistry(self.redis)
+        self.store = AcsStore(self.redis)
+        self.creds = CredentialStore(self.redis, 'magma-acs')
+
+    def _populate(self, claim_id):
+        key = cpe_key_of(claim_id)
+        self.store.create_task(key, 'reboot')
+        self.store.merge_parameters(key, {'Device.X': '1'})
+        self.store.put_model(key, 'generic', {'identity': {'serial': 'SN1'}})
+        self.store.count_inform(key)
+        session = Session('s1', key, '192.0.2.1', session_key='claimed/192.0.2.1/1')
+        self.store.put_session(session)
+        self.store.close_session(session, 'completed', 'done')
+        self.store.put_session(Session('s2', key, '192.0.2.1', session_key='claimed/192.0.2.1/2'))
+        cred, _ = self.creds.begin_rotation(key, 16)
+        self.creds.promote(key, cred.pending_generation)
+        Reacher(None, self.store, client=self.redis).record_attempt(key, False, 'HTTP 401')
+        # Another CPE's records must survive.
+        self.store.create_task(cpe_key_of('other'), 'reboot')
+        return key
+
+    def _assert_forgotten(self, key):
+        self.assertEqual(self.store.list_tasks(key), [])
+        self.assertEqual(self.store.task_counts()['pending'], 1)
+        self.assertEqual(self.store.get_parameters(key).values, {})
+        self.assertIsNone(self.store.get_model(key))
+        self.assertIsNone(self.store.get_inform_count(key))
+        self.assertIsNone(self.store.get_last_session(key))
+        self.assertEqual([s for s in self.store.list_sessions() if s.cpe_key == key], [])
+        self.assertFalse(self.creds.get(key).rotated)
+        self.assertIsNone(Reacher(None, self.store, client=self.redis).last_attempt(key))
+
+    def test_remove_forgets_the_cpe(self):
+        self.claims.add('00A1B2', 'P', 'SN1', claim_id='titan-1')
+        key = self._populate('titan-1')
+        self.claims.remove('titan-1')
+        self._assert_forgotten(key)
+
+    def test_readding_an_id_starts_clean(self):
+        # Records left by an earlier claim under the same id.
+        key = self._populate('titan-1')
+        self.claims.add('00A1B2', 'P', 'SN2', claim_id='titan-1')
+        self._assert_forgotten(key)
+
+    def test_replace_all_forgets_repointed_claims_only(self):
+        self.claims.add('00A1B2', 'P', 'SN1', claim_id='keep')
+        self.claims.add('00A1B2', 'P', 'SN2', claim_id='moved')
+        kept = self._populate('keep')
+        moved = cpe_key_of('moved')
+        self.store.create_task(moved, 'reboot')
+        self.claims.replace_all([
+            Claim('keep', '00A1B2', 'P', 'SN1'),
+            Claim('moved', '00A1B2', 'P', 'SN9'),
+        ])
+        self.assertEqual(self.store.list_tasks(moved), [])
+        self.assertEqual(len(self.store.list_tasks(kept)), 1)
+        self.assertTrue(self.creds.get(kept).rotated)
+
+    def test_custom_forget(self):
+        forgotten = []
+        claims = ClaimRegistry(self.redis, forget=forgotten.append)
+        claims.add('00A1B2', 'P', 'SN1', claim_id='a')
+        claims.remove('a')
+        self.assertEqual(forgotten, ['CLAIMa', 'CLAIMa'])
 
 
 if __name__ == '__main__':
