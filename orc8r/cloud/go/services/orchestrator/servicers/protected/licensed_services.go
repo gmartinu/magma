@@ -27,8 +27,11 @@ var featureDecision = entitlements.ForNetwork
 // filterLicensedServices drops from a gateway's dynamic services the ones
 // whose licensed feature its network is not entitled to, so magmad stops
 // them. Frozen (expired past grace) services stay: they run read-only and
-// keep answering their devices. When the entitlement cannot be read the
-// service stays, so an Orc8r outage never stops a gateway service.
+// keep answering their devices. With no decision known (the entitlements
+// service is down and this process never read the network's), the service
+// stays and runs as if frozen (its own mconfig says so, e.g. acsd's): an
+// Orc8r restart during an outage must not stop the service fleet-wide,
+// and frozen changes nothing on the devices.
 func filterLicensedServices(ctx context.Context, networkID string, services []string) []string {
 	var ret []string
 	decided := map[string]bool{}
@@ -42,7 +45,7 @@ func filterLicensedServices(ctx context.Context, networkID string, services []st
 		if !ok {
 			d, err := featureDecision(ctx, networkID, feature)
 			if err != nil {
-				glog.Warningf("Keeping %s on network %s: cannot read the %s entitlement: %v", svc, networkID, feature, err)
+				glog.Warningf("Keeping %s on network %s, frozen: no %s entitlement known: %v", svc, networkID, feature, err)
 			}
 			keep = err != nil || !d.Denied()
 			decided[feature] = keep
