@@ -65,6 +65,15 @@ enum CpeMode {
   CPE_MODE_CLAIMED = 2;
 }
 
+// How a queued task gets to the CPE.
+enum CpeReach {
+  CPE_REACH_UNSPECIFIED = 0;
+  // acsd sends a Connection Request: the task runs within seconds.
+  CPE_REACH_CONNECTION_REQUEST = 1;
+  // The task waits for the CPE's next periodic Inform (next_inform).
+  CPE_REACH_NEXT_INFORM = 2;
+}
+
 message CpeParameterValue {
   string name = 1;
   string value = 2;
@@ -109,6 +118,9 @@ message CpeTask {
   double deadline = 13;
   // Empty unless the CPE is on the core or reported its SIM.
   string imsi = 14;
+  // Pending tasks only: the CPE's reach and next_inform (see Cpe).
+  CpeReach reach = 15;
+  double next_inform = 16;
 }
 
 message GetTaskRequest {
@@ -149,6 +161,16 @@ message Cpe {
   google.protobuf.Struct model = 14;
   repeated CpeTask tasks = 15;
   map<string, string> parameters = 16;
+  CpeReach reach = 17;
+  // Why reach is NEXT_INFORM: "behind_nat" (the Connection Request URL is
+  // a private or CGNAT address the CPE does not connect from), "no_url",
+  // "no_credential" (acsd set none, as on core CPEs), "disabled",
+  // "connection_request_failed" (until the CPE Informs again), "frozen".
+  string reach_reason = 18;
+  // Unix time the next periodic Inform is due, from the last Inform and
+  // the CPE's PeriodicInformInterval; 0 before the first Inform. In the
+  // past when the CPE is late.
+  double next_inform = 19;
 }
 
 message ListCpesRequest {}

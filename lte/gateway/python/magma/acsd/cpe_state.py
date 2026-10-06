@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from magma.acsd.config import MODE_CLAIMED, MODE_CORE
-from magma.acsd.store import AcsStore, SessionOutcome
+from magma.acsd.store import AcsStore, Session, SessionOutcome
 from orc8r.protos.service303_pb2 import State
 
 CPE_ACS_STATE_TYPE = 'cpe_acs'
@@ -59,6 +59,12 @@ class CpeView:
     pending_tasks: int = 0
     last_session: Optional[Dict[str, Any]] = None
     model: Dict[str, Any] = field(default_factory=dict)
+    # How queued tasks get to the CPE (reach.CONNECTION_REQUEST or
+    # reach.NEXT_INFORM), why, and when its next periodic Inform is due
+    # (Unix time; 0 when unknown).
+    reach: str = ''
+    reach_reason: str = ''
+    next_inform: float = 0.0
 
 
 def cpe_mode(
@@ -93,6 +99,12 @@ def inform_interval(model: Dict[str, Any], default_sec: float) -> float:
     return reported if reported > 0 else default_sec
 
 
+def next_inform(last_inform: float, model: Dict[str, Any], default_interval_sec: float) -> float:
+    if last_inform <= 0:
+        return 0.0
+    return last_inform + inform_interval(model, default_interval_sec)
+
+
 def is_online(
     last_inform: float, model: Dict[str, Any], now: float, default_interval_sec: float,
 ) -> bool:
@@ -110,17 +122,20 @@ class CpeViews:
         store: AcsStore,
         default_interval_sec: float = DEFAULT_INFORM_INTERVAL_SEC,
         clock: Callable[[], float] = time.time,
+        reacher=None,
     ):
+        """`reacher` (a reach.Reacher) fills the reach fields; without it they stay empty."""
         self._store = store
+        self._reacher = reacher
         self.default_interval_sec = default_interval_sec or DEFAULT_INFORM_INTERVAL_SEC
         self._clock = clock
 
     def get(
-        self, cpe_key: str, open_modes: Optional[Dict[str, str]] = None,
+        self, cpe_key: str, open_sessions: Optional[Dict[str, Session]] = None,
     ) -> Optional[CpeView]:
         """
-        The view of a CPE, or None if acsd never heard from it. open_modes
-        maps cpe_key to the mode of its open session; list() passes it so
+        The view of a CPE, or None if acsd never heard from it.
+        open_sessions maps cpe_key to its open session; list() passes it so
         the sessions are read once.
         """
         informs = self._store.get_inform_count(cpe_key)
@@ -131,10 +146,11 @@ class CpeViews:
         identity = model.get('identity', {})
         last = self._store.get_last_session(cpe_key)
         last_inform = informs.last_inform if informs else 0.0
-        if open_modes is None:
-            open_modes = self._open_modes()
-        mode = cpe_mode(open_modes.get(cpe_key), last)
-        return CpeView(
+        if open_sessions is None:
+            open_sessions = self._open_sessions()
+        session = open_sessions.get(cpe_key)
+        mode = cpe_mode(session.mode if session else None, last)
+        view = CpeView(
             cpe_key=cpe_key,
             mode=mode,
             imsi=imsi_of(mode, cpe_key, model),
@@ -149,13 +165,19 @@ class CpeViews:
             pending_tasks=self._store.pending_count(cpe_key),
             last_session=asdict(last) if last else None,
             model=model,
+            next_inform=next_inform(last_inform, model, self.default_interval_sec),
         )
+        if self._reacher is not None:
+            source_ip = session.source_ip if session else (last.source_ip if last else '')
+            reach = self._reacher.assess(cpe_key, model, source_ip, last_inform)
+            view.reach, view.reach_reason = reach.how, reach.reason
+        return view
 
     def list(self, max_age_sec: float = 0) -> List[CpeView]:
         """Every known CPE; with max_age_sec, only those heard from since."""
         now = self._clock()
-        open_modes = self._open_modes()
-        views = (self.get(key, open_modes) for key in self._store.list_cpe_keys())
+        open_sessions = self._open_sessions()
+        views = (self.get(key, open_sessions) for key in self._store.list_cpe_keys())
         return [
             v for v in views
             if v is not None and (max_age_sec <= 0 or now - v.last_inform <= max_age_sec)
@@ -169,8 +191,8 @@ class CpeViews:
         )
         return cpe_mode(open_mode, self._store.get_last_session(cpe_key))
 
-    def _open_modes(self) -> Dict[str, str]:
-        return {s.cpe_key: s.mode for s in self._store.list_sessions()}
+    def _open_sessions(self) -> Dict[str, Session]:
+        return {s.cpe_key: s for s in self._store.list_sessions()}
 
     def operational_states(self) -> List[State]:
         """The `cpe_acs` states, one per CPE heard from lately."""

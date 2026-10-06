@@ -140,6 +140,8 @@ class SessionOutcome:
     tasks_failed: int = 0
     faults: int = 0
     mode: str = 'core'
+    # Where the session came from: for a claimed CPE, usually its NAT.
+    source_ip: str = ''
 
 
 class StoreListener:
@@ -495,6 +497,7 @@ class AcsStore:
             tasks_failed=session.tasks_failed,
             faults=session.faults,
             mode=session.mode,
+            source_ip=session.source_ip,
         )
         self._outcomes[session.cpe_key] = asdict(outcome)
         self._listener.session_ended(outcome)
