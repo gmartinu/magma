@@ -30,6 +30,8 @@ import (
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	configurator_test_init "magma/orc8r/cloud/go/services/configurator/test_init"
+	entitlements_servicers "magma/orc8r/cloud/go/services/entitlements/servicers/protected"
+	entitlements_test_init "magma/orc8r/cloud/go/services/entitlements/test_init"
 	"magma/orc8r/cloud/go/services/obsidian/reverse_proxy"
 	state_test_init "magma/orc8r/cloud/go/services/state/test_init"
 	lib_protos "magma/orc8r/lib/go/protos"
@@ -43,6 +45,8 @@ func init() {
 
 func TestACSServiceThroughObsidian(t *testing.T) {
 	configurator_test_init.StartTestService(t)
+	// The acs routes check the entitlement; not enforced, they all pass.
+	entitlements_test_init.StartTestService(t, entitlements_servicers.Config{}, nil)
 	state_test_init.StartTestService(t)
 	test_init.StartTestService(t, handlers.NewHandlers(nil))
 
