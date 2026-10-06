@@ -153,3 +153,31 @@ def get_cwmp_wan(
             1, int(section.get('nonce_ttl_secs') or auth.nonce_ttl_secs),
         ),
     )
+
+
+DEFAULT_CLAIMED_INFORM_INTERVAL_SEC = 300
+
+
+@dataclass(frozen=True)
+class ReachConfig:
+    """How acsd gets queued tasks to claimed CPEs (the `cwmp_reach` section)."""
+    # PeriodicInformInterval set on claimed CPEs at BOOTSTRAP; 0 leaves theirs.
+    periodic_inform_interval: int = DEFAULT_CLAIMED_INFORM_INTERVAL_SEC
+
+
+def get_reach_config(
+    service_config: Dict[str, Any],
+    mconfig: mconfigs_pb2.AcsD,
+) -> ReachConfig:
+    """
+    Resolve the `cwmp_reach` section of acsd.yml. The mconfig
+    periodic_inform_interval wins when set, as the port does, so Orc8r can
+    tune it per network; 0 (proto default) falls back to acsd.yml.
+    """
+    section = service_config.get('cwmp_reach') or {}
+    interval = section.get('periodic_inform_interval')
+    if interval is None:
+        interval = DEFAULT_CLAIMED_INFORM_INTERVAL_SEC
+    return ReachConfig(
+        periodic_inform_interval=max(0, mconfig.periodic_inform_interval or int(interval)),
+    )
