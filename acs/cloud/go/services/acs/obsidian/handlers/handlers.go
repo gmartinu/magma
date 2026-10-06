@@ -49,6 +49,7 @@ const (
 
 type Handlers struct {
 	cpes CpeManagers
+	logs LogSearcher
 	now  func() time.Time
 }
 
@@ -60,6 +61,7 @@ func (h *Handlers) GetHandlers() []obsidian.Handler {
 	return guardAll(append([]obsidian.Handler{
 		{Path: CpesPath, Methods: obsidian.GET, HandlerFunc: h.listCpes},
 		{Path: CpePath, Methods: obsidian.GET, HandlerFunc: h.getCpe},
+		{Path: LogsPath, Methods: obsidian.GET, HandlerFunc: h.searchLogs},
 	}, h.relayHandlers()...))
 }
 
