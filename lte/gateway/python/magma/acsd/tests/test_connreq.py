@@ -13,6 +13,7 @@ limitations under the License.
 
 import hashlib
 import http.server
+import ipaddress
 import re
 import threading
 import unittest
@@ -21,7 +22,14 @@ from types import SimpleNamespace
 import fakeredis
 import requests
 from magma.acsd.config import CONNECTION_REQUEST_ALWAYS, ReachConfig
-from magma.acsd.connreq import AUTO_COOLDOWN_SEC, IN_SESSION, ConnectionRequester
+from magma.acsd.connreq import (
+    AUTO_COOLDOWN_SEC,
+    IN_SESSION,
+    AddressPolicy,
+    ConnectionRequester,
+    pinned_get,
+    resolve,
+)
 from magma.acsd.credentials import CredentialStore
 from magma.acsd.reach import (
     BEHIND_NAT,
@@ -34,7 +42,9 @@ from magma.acsd.reach import (
 from magma.acsd.store import SESSION_COMPLETED, AcsStore, Session
 
 KEY = 'CLAIMtitan-1'
-NAT_IP = '127.0.0.1'
+# The CPE reports its own public address: no NAT in between.
+NAT_IP = '203.0.113.9'
+GATEWAY = [ipaddress.ip_interface('198.51.100.1/24'), ipaddress.ip_interface('10.0.2.15/24')]
 CPE_REALM = 'titan-cr'
 
 
@@ -67,8 +77,10 @@ class FakeCpe(http.server.BaseHTTPRequestHandler):
     password = ''
     status = 204
     hits = []
+    hosts = []
 
     def do_GET(self):
+        FakeCpe.hosts.append(self.headers.get('Host'))
         auth = self.headers.get('Authorization', '')
         if not auth.startswith('Digest ') or not self._valid(auth):
             self.send_response(401)
@@ -111,8 +123,9 @@ class ConnectionRequesterTest(unittest.TestCase):
         return ConnectionRequester(
             self.reacher, self.store, 5.0,
             http_get=http_get or self._get,
-            resolver=resolver or (lambda host: None),
+            resolver=resolver or (lambda host: []),
             executor=self.executor, clock=self.clock,
+            policy=AddressPolicy(lambda: GATEWAY),
         )
 
     def _get(self, url, **kwargs):
@@ -121,7 +134,7 @@ class ConnectionRequesterTest(unittest.TestCase):
             raise self.response
         return self.response
 
-    def _cpe(self, url='http://127.0.0.1:7547/cr', rotated=True):
+    def _cpe(self, url='http://203.0.113.9:7547/cr', rotated=True):
         self.store.count_inform(KEY)
         self.store.put_model(KEY, 'generic', {
             'management_server': {'connection_request_url': url},
@@ -138,7 +151,8 @@ class ConnectionRequesterTest(unittest.TestCase):
         self.assertTrue(outcome.sent)
         self.assertEqual(outcome.reach.how, CONNECTION_REQUEST)
         [(url, kwargs)] = self.calls
-        self.assertEqual(url, 'http://127.0.0.1:7547/cr')
+        self.assertEqual(url, 'http://203.0.113.9:7547/cr')
+        self.assertEqual(kwargs['address'], '203.0.113.9')
         self.assertEqual(kwargs['auth'].username, KEY + '.1')
         self.assertEqual(kwargs['auth'].password, self.creds.get(KEY).cr_password)
         self.assertEqual(kwargs['timeout'], 5.0)
@@ -188,13 +202,13 @@ class ConnectionRequesterTest(unittest.TestCase):
 
     def test_name_resolving_to_a_private_address_is_refused(self):
         self._cpe(url='http://cpe.carrier.example:7547/')
-        requester = self._requester(ReachConfig(), resolver=lambda host: '10.9.8.7')
+        requester = self._requester(ReachConfig(), resolver=lambda host: ['10.9.8.7'])
         outcome = requester.request(KEY)
         self.assertEqual((outcome.sent, outcome.reach.reason), (False, BEHIND_NAT))
         self.assertIn('resolves to 10.9.8.7', outcome.detail)
         self.assertEqual(self.calls, [])
 
-        requester = self._requester(ReachConfig(), resolver=lambda host: None)
+        requester = self._requester(ReachConfig(), resolver=lambda host: [])
         self.clock.now += 1
         self.store.count_inform(KEY)
         outcome = requester.request(KEY)
@@ -202,15 +216,58 @@ class ConnectionRequesterTest(unittest.TestCase):
 
         self.clock.now += 1
         self.store.count_inform(KEY)
-        requester = self._requester(ReachConfig(), resolver=lambda host: '93.184.216.34')
+        requester = self._requester(ReachConfig(), resolver=lambda host: ['93.184.216.34'])
         self.assertTrue(requester.request(KEY).sent)
+        # Sent to the address that was checked, not resolved again.
+        self.assertEqual(self.calls[-1][1]['address'], '93.184.216.34')
 
-    def test_always_mode_sends_to_any_url_without_resolving(self):
+    def test_every_resolved_address_is_checked(self):
+        # A rebinding name: one public answer, one inside the gateway.
+        self._cpe(url='http://rebind.example:7547/')
+        requester = self._requester(
+            ReachConfig(), resolver=lambda host: ['93.184.216.34', '10.0.2.7'],
+        )
+        outcome = requester.request(KEY)
+        self.assertEqual((outcome.sent, outcome.reach.reason), (False, BEHIND_NAT))
+        self.assertIn('10.0.2.7', outcome.detail)
+        self.assertEqual(self.calls, [])
+
+    def test_always_mode_sends_to_private_addresses(self):
         self._cpe(url='http://cpe.carrier.example:7547/')
         requester = self._requester(
             ReachConfig(connection_request=CONNECTION_REQUEST_ALWAYS),
-            resolver=lambda host: self.fail('resolved'),
+            resolver=lambda host: ['100.64.3.4'],
         )
+        self.assertTrue(requester.request(KEY).sent)
+        self.assertEqual(self.calls[-1][1]['address'], '100.64.3.4')
+
+    def test_always_mode_still_refuses_the_gateway_and_special_addresses(self):
+        always = ReachConfig(connection_request=CONNECTION_REQUEST_ALWAYS)
+        for url, resolved, detail in (
+            ('http://127.0.0.1:7547/', [], 'loopback'),
+            ('http://[::1]:7547/', [], 'loopback'),
+            ('http://cpe.example/', ['169.254.169.254'], 'link-local'),
+            ('http://cpe.example/', ['224.0.0.1'], 'multicast'),
+            ('http://0.0.0.0/', [], 'unspecified'),
+            ('http://198.51.100.1/', [], 'address of this gateway'),
+            ('http://cpe.example/', ['10.0.2.20'], 'network 10.0.2.0/24'),
+        ):
+            self.calls.clear()
+            self.clock.now += 1
+            self.store.count_inform(KEY)
+            self._cpe(url=url)
+            requester = self._requester(always, resolver=lambda host, r=resolved: r)
+            outcome = requester.request(KEY)
+            self.assertEqual((outcome.sent, outcome.reach.reason), (False, FAILED), url)
+            self.assertIn(detail, outcome.detail, url)
+            self.assertEqual(self.calls, [], url)
+
+    def test_always_mode_allows_the_session_source_on_a_gateway_network(self):
+        # A CPE on the gateway's LAN, reporting the address it comes from.
+        self._cpe(url='http://10.0.2.20:7547/')
+        session = Session('s1', KEY, '10.0.2.20', session_key='claimed/x', mode='claimed')
+        self.store.close_session(session, SESSION_COMPLETED, 'session ended')
+        requester = self._requester(ReachConfig(connection_request=CONNECTION_REQUEST_ALWAYS))
         self.assertTrue(requester.request(KEY).sent)
 
     def test_request_soon_skips_a_cpe_already_asked(self):
@@ -259,7 +316,9 @@ class DigestOverHttpTest(unittest.TestCase):
         session = Session('s1', KEY, '127.0.0.1', session_key='claimed/x', mode='claimed')
         self.store.close_session(session, SESSION_COMPLETED, 'session ended')
         self.reacher = Reacher(ReachConfig(), self.store, self.creds, redis)
-        self.requester = ConnectionRequester(self.reacher, self.store, 2.0)
+        # The stand-in CPE listens on loopback, which the real policy refuses.
+        loopback_ok = SimpleNamespace(refusal=lambda *args: None)
+        self.requester = ConnectionRequester(self.reacher, self.store, 2.0, policy=loopback_ok)
 
     def tearDown(self):
         self.server.shutdown()
@@ -278,6 +337,42 @@ class DigestOverHttpTest(unittest.TestCase):
     def test_other_status_is_a_failure(self):
         FakeCpe.status = 503
         self.assertEqual(self.requester.request(KEY).detail, 'HTTP 503')
+
+
+class PinnedGetTest(unittest.TestCase):
+    """pinned_get connects to the given address and keeps the URL's Host."""
+
+    def setUp(self):
+        self.server = http.server.HTTPServer(('127.0.0.1', 0), FakeCpe)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        FakeCpe.status, FakeCpe.hits, FakeCpe.hosts = 204, [], []
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_name_is_never_resolved(self):
+        url = 'http://cpe.invalid:%d/cr' % self.server.server_port
+        resp = pinned_get(url, address='127.0.0.1', timeout=2, allow_redirects=False)
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(FakeCpe.hosts, ['cpe.invalid:%d' % self.server.server_port])
+
+    def test_interface_netmasks(self):
+        from magma.acsd.connreq import _prefix
+        self.assertEqual(_prefix('ffff:ffff:ffff:ffff::'), '64')
+        self.assertEqual(_prefix('ffff:ffff::/32'), '32')
+        self.assertEqual(_prefix('255.255.255.0'), '255.255.255.0')
+
+    def test_policy_reads_the_interfaces_once_per_refresh(self):
+        reads = []
+        policy = AddressPolicy(lambda: reads.append(1) or GATEWAY, clock=lambda: 0.0)
+        for _ in range(3):
+            policy.refusal(ipaddress.ip_address('192.0.2.1'), '', True)
+        self.assertEqual(len(reads), 1)
+
+    def test_resolve_lists_addresses_once_each(self):
+        addresses = resolve('127.0.0.1')
+        self.assertEqual(addresses, ['127.0.0.1'])
 
 
 if __name__ == '__main__':
