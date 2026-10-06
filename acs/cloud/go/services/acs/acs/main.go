@@ -49,7 +49,7 @@ func main() {
 	cpeReports := reports.NewStore(factory)
 	state_protos.RegisterIndexerServer(srv.ProtectedGrpcServer, reports.NewIndexerServicer(cpeReports))
 
-	h := handlers.NewHandlers(handlers.NewSyncRPCCpeManagers())
+	h := handlers.NewHandlers(handlers.NewSyncRPCCpeManagers(), cpeReports)
 	// The same Elasticsearch, from orc8r's elastic.yml, as the events API.
 	if es, err := eventd_client.GetElasticClient(); err != nil {
 		glog.Errorf("Session log search disabled: %s", err)
