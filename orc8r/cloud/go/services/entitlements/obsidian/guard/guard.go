@@ -35,8 +35,9 @@ var ForNetwork = entitlements.ForNetwork
 //     for anything else;
 //   - disabled: 403.
 //
-// When the entitlements service cannot answer, reads pass and writes get
-// 503: an outage must not hide data, nor let an expired tenant write.
+// When the entitlements service cannot answer, the decision is the last
+// known one (entitlements.ForNetwork); with none known, every call gets
+// 503, as passing reads would show a disabled tenant its data.
 func CheckEntitlement(c echo.Context, feature string) error {
 	networkID := c.Param("network_id")
 	if networkID == "" {
@@ -46,9 +47,6 @@ func CheckEntitlement(c echo.Context, feature string) error {
 	d, err := ForNetwork(c.Request().Context(), networkID, feature)
 	if err != nil {
 		glog.Errorf("Checking the %s entitlement of network %s: %v", feature, networkID, err)
-		if read {
-			return nil
-		}
 		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("cannot check the %s entitlement: try again", feature))
 	}
 	switch {
