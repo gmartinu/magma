@@ -17,14 +17,18 @@ from types import SimpleNamespace
 
 import fakeredis
 from magma.acsd import tasks
-from magma.acsd.claimed import ROTATE_CREDENTIALS, ClaimedMode
+from magma.acsd.claimed import (
+    CONFIGURE_PERIODIC_INFORM,
+    ROTATE_CREDENTIALS,
+    ClaimedMode,
+)
 from magma.acsd.claims import ClaimRegistry
 from magma.acsd.config import LISTENER_MODE, MODE_CLAIMED
 from magma.acsd.credentials import CredentialStore
 from magma.acsd.datamodel import GENERIC, Quirks, Registry
 from magma.acsd.digest import DIGEST_USERNAME, ha1_of
 from magma.acsd.session import HTTP_403, CwmpSessionHandler
-from magma.acsd.store import TASK_DONE, TASK_FAILED, AcsStore
+from magma.acsd.store import TASK_DONE, TASK_FAILED, TASK_PENDING, AcsStore
 from magma.tr069 import models
 
 REALM = 'magma-acs'
@@ -37,11 +41,14 @@ WAN_PARAM = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.' \
     'WANIPConnection.1.ExternalIPAddress'
 
 
-def _inform(serial=SERIAL, **params):
+def _inform(serial=SERIAL, events=(), **params):
     return models.Inform(
         DeviceId=models.DeviceIdStruct(
             OUI=OUI, ProductClass=PRODUCT, SerialNumber=serial,
         ),
+        Event=models.EventList(EventStruct=[
+            models.EventStruct(EventCode=code, CommandKey='') for code in events
+        ]),
         MaxEnvelopes=1,
         ParameterList=models.ParameterValueList(ParameterValueStruct=[
             models.ParameterValueStruct(
@@ -70,9 +77,10 @@ class ClaimedSessionTest(unittest.TestCase):
         self.creds = CredentialStore(self.redis, REALM)
         self.handler = self._handler()
 
-    def _handler(self, registry=None):
+    def _handler(self, registry=None, interval=0):
         self.mode = ClaimedMode(
             self.claims, self.creds, self.store, BOOT_USER, BOOT_PASSWORD,
+            interval,
         )
         kwargs = {'registry': registry} if registry else {}
         return CwmpSessionHandler(
@@ -252,6 +260,89 @@ class ClaimedSessionTest(unittest.TestCase):
         spv2, _ = self.send(models.DummyInput(), port=40001)
         self.assertEqual(_spv_values(spv1)[MS + 'Username'], KEY + '.1')
         self.assertEqual(_spv_values(spv2)[MS + 'Username'], 'CLAIMtitan-2.1')
+
+
+class PeriodicInformTest(unittest.TestCase):
+    """The short periodic Inform a claimed CPE gets at BOOTSTRAP."""
+
+    setUp = ClaimedSessionTest.setUp
+    _ctx = ClaimedSessionTest._ctx
+    send = ClaimedSessionTest.send
+
+    def _handler(self, registry=None):
+        return ClaimedSessionTest._handler(self, registry, interval=300)
+
+    def bootstrap(self, events=('0 BOOTSTRAP', '1 BOOT'), **params):
+        """A BOOTSTRAP session through the rotation; returns the next request."""
+        self.send(_inform(events=events, **params))
+        rotation, _ = self.send(models.DummyInput())
+        self.assertTrue(any(n.endswith('ManagementServer.Username') for n in _spv_values(rotation)))
+        nxt, _ = self.send(models.SetParameterValuesResponse(Status=0))
+        return nxt
+
+    def test_bootstrap_sets_the_periodic_inform_after_the_rotation(self):
+        spv = self.bootstrap()
+        self.assertIsInstance(spv, models.SetParameterValues)
+        self.assertEqual(_spv_values(spv), {
+            MS + 'PeriodicInformEnable': 'true',
+            MS + 'PeriodicInformInterval': '300',
+        })
+        types = {
+            p.Name: p.Value.type for p in spv.ParameterList.ParameterValueStruct
+        }
+        self.assertEqual(types[MS + 'PeriodicInformInterval'], 'xsd:unsignedInt')
+        end, _ = self.send(models.SetParameterValuesResponse(Status=0))
+        self.assertIsInstance(end, models.DummyInput)
+        task = self.store.list_tasks(KEY)[-1]
+        self.assertEqual((task.type, task.status), (CONFIGURE_PERIODIC_INFORM, TASK_DONE))
+        # The model follows what the CPE accepted.
+        ms = self.store.get_model(KEY).model['management_server']
+        self.assertEqual(ms['periodic_inform_interval'], 300)
+        self.assertIs(ms['periodic_inform_enable'], True)
+
+    def test_tr098_cpe_gets_it_under_its_root(self):
+        spv = self.bootstrap(**{'InternetGatewayDevice.ManagementServer.URL': 'https://acs'})
+        self.assertEqual(set(_spv_values(spv)), {
+            'InternetGatewayDevice.ManagementServer.PeriodicInformEnable',
+            'InternetGatewayDevice.ManagementServer.PeriodicInformInterval',
+        })
+
+    def test_only_bootstrap_sessions_queue_it(self):
+        end = self.bootstrap(events=('1 BOOT',))
+        self.assertIsInstance(end, models.DummyInput)
+        self.assertEqual(
+            [t.type for t in self.store.list_tasks(KEY)], [ROTATE_CREDENTIALS],
+        )
+
+    def test_a_repeated_bootstrap_does_not_queue_it_twice(self):
+        # The CPE drops the session before answering anything.
+        self.send(_inform(events=('0 BOOTSTRAP',)))
+        self.send(_inform(events=('0 BOOTSTRAP',)), port=40001)
+        periodic = [
+            t for t in self.store.list_tasks(KEY) if t.type == CONFIGURE_PERIODIC_INFORM
+        ]
+        self.assertEqual(len(periodic), 1)
+        self.assertEqual(periodic[0].status, TASK_PENDING)
+
+    def test_a_refused_interval_does_not_touch_the_credentials(self):
+        spv = self.bootstrap()
+        self.assertIn(MS + 'PeriodicInformInterval', _spv_values(spv))
+        self.send(models.Fault(FaultCode=9007, FaultString='invalid value'))
+        self.assertTrue(self.creds.get(KEY).rotated)
+        task = self.store.list_tasks(KEY)[-1]
+        self.assertEqual((task.type, task.status), (CONFIGURE_PERIODIC_INFORM, TASK_FAILED))
+
+    def test_zero_interval_leaves_the_cpe_value(self):
+        self.handler = ClaimedSessionTest._handler(self, interval=0)
+        end = self.bootstrap()
+        self.assertIsInstance(end, models.DummyInput)
+
+    def test_frozen_acsd_queues_nothing(self):
+        self.handler = CwmpSessionHandler(
+            store=self.store, claimed=self.mode, frozen=True,
+        )
+        self.send(_inform(events=('0 BOOTSTRAP',)))
+        self.assertEqual(self.store.list_tasks(KEY), [])
 
 
 if __name__ == '__main__':
