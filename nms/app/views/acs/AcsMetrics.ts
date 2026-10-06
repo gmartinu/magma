@@ -58,6 +58,18 @@ export function cpeSelector(metric: string, cpeKey: string): string {
   return `${metric}{cpe_key="${selectorValue(cpeKey)}"}`;
 }
 
+// One series per CPE: acsd's gauges carry the gateway's labels, so a CPE
+// that moved to another AGW, or a claim key on two AGWs, has a series per
+// gateway until the old one goes stale; Prometheus would answer them in no
+// particular order and the chart would plot whichever came first.
+export function cpeKpiQuery(metric: string, cpeKey: string): string {
+  return `max by (cpe_key) (${cpeSelector(metric, cpeKey)})`;
+}
+
+export function networkKpiQuery(metric: string): string {
+  return `max by (cpe_key) (${metric})`;
+}
+
 export function stepFor(rangeSec: number): string {
   // ~300 points per chart, never finer than the 60 s scrape.
   return `${Math.max(60, Math.round(rangeSec / 300))}s`;
@@ -123,8 +135,8 @@ export async function latestSignal(
   networkId: string,
 ): Promise<Record<string, {rsrp?: number; sinr?: number}>> {
   const [rsrp, sinr] = await Promise.all([
-    queryInstant(networkId, 'acs_rsrp_dbm'),
-    queryInstant(networkId, 'acs_sinr_db'),
+    queryInstant(networkId, networkKpiQuery('acs_rsrp_dbm')),
+    queryInstant(networkId, networkKpiQuery('acs_sinr_db')),
   ]);
   const out: Record<string, {rsrp?: number; sinr?: number}> = {};
   for (const [key, v] of Object.entries(byLabel(rsrp, 'cpe_key'))) {

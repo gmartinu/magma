@@ -22,7 +22,7 @@ import TextField from '@mui/material/TextField';
 import {
   CPE_KPIS,
   KpiPoint,
-  cpeSelector,
+  cpeKpiQuery,
   queryRange,
   toPoints,
 } from './AcsMetrics';
@@ -143,7 +143,7 @@ export default function AcsKpiCharts({
       const start = new Date(end.getTime() - hours * 3600 * 1000);
       const series = await Promise.all(
         CPE_KPIS.map(k =>
-          queryRange(networkId, cpeSelector(k.metric, cpeKey), start, end).then(
+          queryRange(networkId, cpeKpiQuery(k.metric, cpeKey), start, end).then(
             toPoints,
           ),
         ),
