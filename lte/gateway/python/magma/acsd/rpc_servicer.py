@@ -26,6 +26,7 @@ from lte.protos.cpe_acs_pb2_grpc import (
     add_CpeManagerServicer_to_server,
 )
 from magma.acsd import tasks
+from magma.acsd.connreq import ConnectionRequester
 from magma.acsd.cpe_state import (
     MODE_CLAIMED,
     MODE_CORE,
@@ -49,7 +50,7 @@ _REACH = {
 _TYPE_PREFIX = 'CPE_TASK_TYPE_'
 _STATUS_PREFIX = 'CPE_TASK_STATUS_'
 CONNECTION_REQUEST_UNIMPLEMENTED = (
-    'acsd does not send Connection Requests yet; queued tasks run at the '
+    'this acsd sends no Connection Requests; queued tasks run at the '
     "CPE's next periodic Inform"
 )
 FROZEN = 'acsd is frozen (entitlement expired): it queues no tasks'
@@ -62,9 +63,17 @@ class CpeManagerRpcServicer(CpeManagerServicer):
     so a second AcsStore would race the handler.
     """
 
-    def __init__(self, store: AcsStore, views: CpeViews, frozen: bool = False):
+    def __init__(
+        self,
+        store: AcsStore,
+        views: CpeViews,
+        frozen: bool = False,
+        requester: Optional[ConnectionRequester] = None,
+    ):
+        """`requester` sends Connection Requests; without it there are none."""
         self._store = store
         self._views = views
+        self._requester = requester
         # A frozen acsd (expired entitlement) queues nothing for its CPEs.
         self._frozen = frozen
 
@@ -92,6 +101,8 @@ class CpeManagerRpcServicer(CpeManagerServicer):
         except tasks.InvalidTask as err:
             return _error(context, grpc.StatusCode.INVALID_ARGUMENT, str(err), pb.CpeTask())
         logging.info('Queued task %s (%s) for %s', task.task_id, task.type, task.cpe_key)
+        if self._requester is not None:
+            self._requester.request_soon(task.cpe_key)
         return task_to_proto(task, self._views.get(task.cpe_key))
 
     def GetTask(self, request: pb.GetTaskRequest, context) -> pb.CpeTask:
@@ -125,9 +136,27 @@ class CpeManagerRpcServicer(CpeManagerServicer):
     def ConnectionRequest(
         self, request: pb.ConnectionRequestRequest, context,
     ) -> pb.ConnectionRequestResponse:
-        return _error(
-            context, grpc.StatusCode.UNIMPLEMENTED,
-            CONNECTION_REQUEST_UNIMPLEMENTED, pb.ConnectionRequestResponse(),
+        empty = pb.ConnectionRequestResponse()
+        if not request.cpe_key:
+            return _error(context, grpc.StatusCode.INVALID_ARGUMENT, 'cpe_key is required', empty)
+        if self._requester is None:
+            return _error(
+                context, grpc.StatusCode.UNIMPLEMENTED, CONNECTION_REQUEST_UNIMPLEMENTED, empty,
+            )
+        if self._frozen:
+            return _error(context, grpc.StatusCode.FAILED_PRECONDITION, FROZEN, empty)
+        view = self._views.get(request.cpe_key)
+        if view is None:
+            return _error(
+                context, grpc.StatusCode.NOT_FOUND, 'no CPE %r' % request.cpe_key, empty,
+            )
+        outcome = self._requester.request(request.cpe_key)
+        return pb.ConnectionRequestResponse(
+            sent=outcome.sent,
+            reach=_REACH.get(outcome.reach.how, pb.CPE_REACH_UNSPECIFIED),
+            reason=outcome.reach.reason,
+            next_inform=view.next_inform,
+            detail=outcome.detail,
         )
 
 

@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.claimed import ClaimedMode
 from magma.acsd.claims import ClaimRegistry
+from magma.acsd.connreq import ConnectionRequester
 from magma.acsd.config import (
     AUTH_OFF,
     MODE_CLAIMED,
@@ -230,7 +231,10 @@ def main():
     )
 
     service.register_operational_states_callback(views.operational_states)
-    CpeManagerRpcServicer(handler.store, views, frozen).add_to_server(service.rpc_server)
+    requester = ConnectionRequester(reacher, store, reach.connection_request_timeout_secs)
+    CpeManagerRpcServicer(
+        handler.store, views, frozen, requester,
+    ).add_to_server(service.rpc_server)
     schedule_reaper(
         service.loop, store,
         then=lambda: metrics.refresh(views.list(STATE_MAX_AGE_SEC), store.task_counts()),

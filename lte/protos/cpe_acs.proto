@@ -33,7 +33,8 @@ service CpeManager {
   // One CPE with its normalized model and tasks. NOT_FOUND when unknown.
   rpc GetCpe (GetCpeRequest) returns (Cpe) {}
   // Ask the CPE to open a session now instead of at its next periodic
-  // Inform. UNIMPLEMENTED until acsd sends Connection Requests.
+  // Inform, when its reach allows it. EnqueueTask already does so.
+  // NOT_FOUND for an unknown CPE, FAILED_PRECONDITION when frozen.
   rpc ConnectionRequest (ConnectionRequestRequest) returns (ConnectionRequestResponse) {}
 }
 
@@ -188,4 +189,14 @@ message ConnectionRequestRequest {
   string cpe_key = 1;
 }
 
-message ConnectionRequestResponse {}
+message ConnectionRequestResponse {
+  // The CPE accepted it (HTTP 200/204) and should open a session now.
+  bool sent = 1;
+  // NEXT_INFORM when not sent, with the reason (see Cpe.reach_reason), or
+  // CONNECTION_REQUEST with "in_session" when the CPE has one open.
+  CpeReach reach = 2;
+  string reason = 3;
+  double next_inform = 4;
+  // Why it failed: the HTTP status or the error.
+  string detail = 5;
+}
