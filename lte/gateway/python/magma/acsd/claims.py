@@ -18,6 +18,12 @@ keyed by CLAIM_PREFIX + claim id, which can never equal an IMSI key.
 
 Claims are added locally today (Python API and acsd_cli.py); Stage 3 feeds
 them from Orc8r through replace_all().
+
+A claim id names a device only while its claim stands: when a claim goes
+away or is re-pointed at another device, and before a claim is added,
+every record acsd keeps under its cpe_key is dropped (forget_cpe), so a
+new device never inherits the tasks, model, outcomes or credential of
+the one claimed before it under the same id.
 """
 
 import re
@@ -27,6 +33,9 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Callable, Iterable, List, Optional
 
+from magma.acsd.credentials import CredentialStore
+from magma.acsd.reach import forget_attempt
+from magma.acsd.store import AcsStore
 from magma.common.redis.containers import RedisHashDict
 from magma.common.redis.serializers import (
     get_json_deserializer,
@@ -72,6 +81,18 @@ def device_key(oui: str, product_class: str, serial: str) -> str:
     return '\x1f'.join((oui.strip().upper(), product_class.strip(), serial.strip()))
 
 
+def forget_cpe(client, cpe_key: str, prefix: str = 'acsd') -> None:
+    """
+    Drop every record acsd keeps for `cpe_key`: its credentials, the
+    AcsStore records (tasks, sessions, parameters, model, informs, last
+    outcome) and its last Connection Request attempt.
+    """
+    # The realm only matters for creating credentials.
+    CredentialStore(client, '', prefix).reset(cpe_key)
+    AcsStore(client, prefix).purge_cpe(cpe_key)
+    forget_attempt(client, cpe_key, prefix)
+
+
 class ClaimRegistry:
     """Claims in Redis next to the AcsStore records, under the same prefix."""
 
@@ -80,9 +101,15 @@ class ClaimRegistry:
         client,
         prefix: str = 'acsd',
         clock: Callable[[], float] = time.time,
+        forget: Optional[Callable[[str], None]] = None,
     ):
+        """
+        `forget(cpe_key)` drops the records of a claim id that stops naming
+        its device; forget_cpe on this Redis by default.
+        """
         self._clock = clock
         self._lock = threading.RLock()
+        self._forget = forget or (lambda cpe_key: forget_cpe(client, cpe_key, prefix))
 
         def hash_dict(name):
             return RedisHashDict(
@@ -118,6 +145,9 @@ class ClaimRegistry:
                         oui, product_class, serial, self._by_device[key],
                     ),
                 )
+            # Left over from an earlier claim under this id, e.g. one
+            # removed by a process that died before cleaning up.
+            self._forget(cpe_key_of(claim_id))
             claim = Claim(
                 claim_id=claim_id,
                 oui=oui.strip().upper(),
@@ -132,6 +162,7 @@ class ClaimRegistry:
             return claim
 
     def remove(self, claim_id: str) -> Optional[Claim]:
+        """Drop a claim and every record of its CPE."""
         with self._lock:
             raw = self._claims.pop(claim_id, None)
             if raw is None:
@@ -140,6 +171,8 @@ class ClaimRegistry:
             self._by_device.pop(
                 device_key(claim.oui, claim.product_class, claim.serial), None,
             )
+            # After the claim is gone, so no new session can start for it.
+            self._forget(claim.cpe_key)
             return claim
 
     def get(self, claim_id: str) -> Optional[Claim]:
@@ -161,7 +194,7 @@ class ClaimRegistry:
         """
         Make `claims` the whole set, for a feed that owns them (Orc8r,
         Stage 3). Returns the claim ids that were removed or now name
-        another device: the caller drops their credentials.
+        another device; their records are dropped.
         """
         wanted = {c.claim_id: c for c in claims}
         with self._lock:

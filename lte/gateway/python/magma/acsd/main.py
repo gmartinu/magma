@@ -47,7 +47,7 @@ from magma.acsd.digest import (
 from magma.acsd.events import AcsEvents, EventEmitter
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
-from magma.acsd.reach import Reacher
+from magma.acsd.reach import Reacher, forget_attempt
 from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
@@ -115,11 +115,25 @@ def make_claimed_mode(
             'cwmp_wan is on without a bootstrap credential; only claimed CPEs '
             'that already rotated to a per-CPE one can get in',
         )
-    return ClaimedMode(
-        ClaimRegistry(client), CredentialStore(client, wan.realm), store,
+    credentials = CredentialStore(client, wan.realm)
+    modes = []
+
+    def forget(cpe_key: str) -> None:
+        # Through the live store, whose lock the CWMP handler holds for
+        # its compound updates.
+        store.purge_cpe(cpe_key)
+        forget_attempt(client, cpe_key)
+        for mode in modes:
+            mode.reset(cpe_key)
+        credentials.reset(cpe_key)
+
+    mode = ClaimedMode(
+        ClaimRegistry(client, forget=forget), credentials, store,
         wan.bootstrap_username, wan.bootstrap_password,
         reach.periodic_inform_interval,
     )
+    modes.append(mode)
+    return mode
 
 
 def start_wan_listener(
