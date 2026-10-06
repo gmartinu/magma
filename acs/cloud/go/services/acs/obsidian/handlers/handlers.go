@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"magma/acs/cloud/go/acs"
+	acs_service "magma/acs/cloud/go/services/acs"
 	"magma/acs/cloud/go/services/acs/cpestate"
 	"magma/acs/cloud/go/services/acs/obsidian/models"
 	"magma/acs/cloud/go/services/acs/reports"
@@ -41,6 +42,8 @@ const (
 	// magmad reports state every minute; past this the AGW is taken as
 	// gone and its CPEs as offline, whatever acsd last said.
 	stateStaleAfter = 10 * time.Minute
+
+	defaultStaleCpeAfter = acs_service.DefaultStaleCpeAfterHours * time.Hour
 )
 
 // CpeReports reads what each gateway reports of the CPEs; reports.Store
@@ -51,14 +54,35 @@ type CpeReports interface {
 }
 
 type Handlers struct {
-	cpes    CpeManagers
-	reports CpeReports
-	logs    LogSearcher
-	now     func() time.Time
+	cpes          CpeManagers
+	reports       CpeReports
+	logs          LogSearcher
+	now           func() time.Time
+	staleCpeAfter time.Duration
 }
 
 func NewHandlers(cpes CpeManagers, cpeReports CpeReports) *Handlers {
-	return &Handlers{cpes: cpes, reports: cpeReports, now: time.Now}
+	return &Handlers{cpes: cpes, reports: cpeReports, now: time.Now, staleCpeAfter: defaultStaleCpeAfter}
+}
+
+// WithStaleCpeAfter sets how old a CPE's last Inform may be for the CPE
+// list to show it by default; 0 or less keeps the default (7 days).
+func (h *Handlers) WithStaleCpeAfter(d time.Duration) *Handlers {
+	if d > 0 {
+		h.staleCpeAfter = d
+	}
+	return h
+}
+
+// stale reports whether r's CPE has been silent past the horizon. Nothing
+// deletes a cpe_acs row from Orc8r (acsd stops reporting a CPE after 7
+// days, the cloud keeps the last report), so the list hides such rows.
+func (h *Handlers) stale(r reports.Report) bool {
+	last := time.UnixMilli(int64(r.View.LastInform * 1000))
+	if r.View.LastInform <= 0 {
+		last = time.UnixMilli(int64(r.TimeMs))
+	}
+	return h.now().Sub(last) > h.staleCpeAfter
 }
 
 func (h *Handlers) GetHandlers() []obsidian.Handler {
@@ -112,6 +136,13 @@ func (h *Handlers) listCpes(c echo.Context) error {
 		}
 		online = &b
 	}
+	includeStale := false
+	if v := c.QueryParam("include_stale"); v != "" {
+		if v != "true" && v != "false" {
+			return echo.NewHTTPError(http.StatusBadRequest, "include_stale must be true or false")
+		}
+		includeStale = v == "true"
+	}
 	model, gatewayID, mode := c.QueryParam("model"), c.QueryParam("gateway_id"), c.QueryParam("mode")
 
 	out := []*models.AcsCpe{}
@@ -120,6 +151,9 @@ func (h *Handlers) listCpes(c echo.Context) error {
 			continue
 		}
 		owner, others := reports.Resolve(rs)
+		if !includeStale && h.stale(owner) {
+			continue
+		}
 		cpe := h.toCpe(owner, others, gateways)
 		if model != "" && model != cpe.ModelName && model != cpe.ProductClass {
 			continue
