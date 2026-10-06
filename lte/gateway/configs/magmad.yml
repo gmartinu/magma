@@ -134,6 +134,7 @@ metricsd:
     - state
     - sessiond
     - acsd
+    - monitord
 #    - kernsnoopd
 
 generic_command_config:
