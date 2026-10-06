@@ -56,6 +56,39 @@ class ValidateTest(unittest.TestCase):
                 tasks.validate(task_type, args)
 
 
+    def test_acsd_owned_management_server_parameters_are_refused(self):
+        for name in (
+            'Device.ManagementServer.URL',
+            'Device.ManagementServer.Username',
+            'InternetGatewayDevice.ManagementServer.Password',
+            'Device.ManagementServer.ConnectionRequestUsername',
+            'Device.ManagementServer.connectionrequestpassword',
+        ):
+            args = {'parameter_values': [
+                {'name': 'Device.WiFi.SSID.1.SSID', 'value': 'x'},
+                {'name': name, 'value': 'y'},
+            ]}
+            with self.assertRaisesRegex(tasks.InvalidTask, 'managed by acsd', msg=name):
+                tasks.validate(tasks.SET_PARAMETER_VALUES, args)
+
+    def test_other_management_server_parameters_are_allowed(self):
+        for name in (
+            'Device.ManagementServer.PeriodicInformInterval',
+            'Device.ManagementServer.ConnectionRequestURL',
+            'Device.X_VENDOR.URL',
+        ):
+            tasks.validate(
+                tasks.SET_PARAMETER_VALUES,
+                {'parameter_values': [{'name': name, 'value': '1'}]},
+            )
+
+    def test_reading_management_server_parameters_is_allowed(self):
+        tasks.validate(
+            tasks.GET_PARAMETER_VALUES,
+            {'parameter_names': ['Device.ManagementServer.URL']},
+        )
+
+
 class EnqueueTest(unittest.TestCase):
     def setUp(self):
         self.store = AcsStore(fakeredis.FakeStrictRedis())
