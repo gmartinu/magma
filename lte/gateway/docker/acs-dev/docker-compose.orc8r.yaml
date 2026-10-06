@@ -96,5 +96,44 @@ services:
           fi
         done
 
+  # acsd's session log: acsd -> eventd (validates against
+  # lte/swagger/cpe_acs_events.v1.yml) -> td-agent-bit on 127.0.0.1:5170.
+  # Both wait for the mconfig magmad streams (eventd's and td-agent-bit's
+  # sections, the latter with the network_id/gateway_id tags the logs
+  # search filters on).
+  eventd:
+    <<: *agw
+    depends_on:
+      magmad:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50075"]
+      interval: 4s
+      retries: 30
+    command:
+      - /bin/bash
+      - -c
+      - |
+        until grep -qs '"eventd"' /var/opt/magma/configs/gateway.mconfig; do sleep 2; done
+        exec python3 -m magma.eventd.main
+
+  # Profile `logs`, with elasticsearch and fluentd in orc8r/. The config is
+  # rendered from the stock template once magmad has the gateway cert (TLS
+  # to fluentd.magma.test:24224, from control_proxy.yml) and the mconfig.
+  td-agent-bit:
+    <<: *agw
+    profiles: [logs]
+    depends_on:
+      magmad:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -c
+      - |
+        until test -s /var/opt/magma/certs/gateway.crt &&
+          grep -qs '"td-agent-bit"' /var/opt/magma/configs/gateway.mconfig; do sleep 2; done
+        python3 /magma/orc8r/gateway/python/scripts/generate_fluent_bit_config.py
+        exec /opt/td-agent-bit/bin/td-agent-bit -c /var/opt/magma/tmp/td-agent-bit.conf
+
 volumes:
   agw-configs:

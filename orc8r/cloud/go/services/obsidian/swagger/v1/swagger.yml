@@ -216,6 +216,65 @@ paths:
       summary: Get a task of a CPE
       tags:
       - ACS
+  /acs/{network_id}/logs:
+    get:
+      description: |
+        The events acsd sends to eventd (one cpe_session_completed per CWMP session, one cpe_task_failed per task out of retries), newest first, as fluentd indexed them into the eventd-* Elasticsearch indices. Kept for the Elasticsearch retention.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - description: Only records of this CPE
+        in: query
+        name: cpe_key
+        required: false
+        type: string
+      - description: Only records sent by this gateway
+        in: query
+        name: gateway_id
+        required: false
+        type: string
+      - description: Only records of this event
+        enum:
+        - cpe_session_completed
+        - cpe_task_failed
+        in: query
+        name: event
+        required: false
+        type: string
+      - description: Only records at or after this time (RFC 3339)
+        format: date-time
+        in: query
+        name: start
+        required: false
+        type: string
+      - description: Only records at or before this time (RFC 3339)
+        format: date-time
+        in: query
+        name: end
+        required: false
+        type: string
+      - description: Records per page (1-1000, default 100)
+        in: query
+        maximum: 1000
+        minimum: 1
+        name: size
+        required: false
+        type: integer
+      - description: Records to skip, for the next pages
+        in: query
+        minimum: 0
+        name: from
+        required: false
+        type: integer
+      responses:
+        "200":
+          description: A page of records
+          schema:
+            $ref: '#/definitions/acs_logs'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Search the session log of the network's CPEs
+      tags:
+      - ACS
   /channels:
     get:
       responses:
@@ -6782,6 +6841,92 @@ definitions:
       tasks_failed:
         format: int32
         type: integer
+    type: object
+  acs_log:
+    description: |
+      One acsd event. Session fields are set on cpe_session_completed, task fields on cpe_task_failed (lte/swagger/cpe_acs_events.v1.yml).
+    properties:
+      attempts:
+        format: int32
+        type: integer
+      cpe_key:
+        type: string
+        x-nullable: false
+      ended:
+        format: date-time
+        type: string
+        x-nullable: true
+      event:
+        enum:
+        - cpe_session_completed
+        - cpe_task_failed
+        type: string
+        x-nullable: false
+      fault_code:
+        description: 0 when the task failed because its sessions kept dropping
+        format: int32
+        type: integer
+      fault_string:
+        type: string
+      faults:
+        format: int32
+        type: integer
+      gateway_id:
+        type: string
+      hardware_id:
+        type: string
+      imsi:
+        description: Empty when acsd does not know the CPE's IMSI
+        type: string
+      max_attempts:
+        format: int32
+        type: integer
+      reason:
+        type: string
+      result:
+        description: completed, timed_out or interrupted
+        type: string
+      session_id:
+        type: string
+      started:
+        format: date-time
+        type: string
+        x-nullable: true
+      task_id:
+        type: string
+      task_type:
+        type: string
+      tasks_done:
+        format: int32
+        type: integer
+      tasks_failed:
+        format: int32
+        type: integer
+      time:
+        description: When eventd received the event
+        format: date-time
+        type: string
+        x-nullable: false
+    required:
+    - time
+    - event
+    - cpe_key
+    type: object
+  acs_logs:
+    description: A page of session log records
+    properties:
+      logs:
+        items:
+          $ref: '#/definitions/acs_log'
+        type: array
+      total_count:
+        description: Records matching the query, on every page
+        format: int64
+        type: integer
+        x-nullable: false
+    required:
+    - total_count
+    - logs
     type: object
   acs_parameter:
     description: A raw TR-069 parameter as acsd last read it
