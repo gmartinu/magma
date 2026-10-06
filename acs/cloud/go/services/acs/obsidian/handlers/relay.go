@@ -111,6 +111,10 @@ func relayError(err error) *echo.HTTPError {
 		code = http.StatusNotImplemented
 	case codes.Unavailable, codes.DeadlineExceeded:
 		code = http.StatusServiceUnavailable
+	case codes.FailedPrecondition:
+		// acsd answers FAILED_PRECONDITION only when frozen: the network's
+		// acs entitlement expired past grace and acsd changes nothing.
+		return echo.NewHTTPError(http.StatusConflict, "acsd is frozen: the acs entitlement of the network has expired, so CPEs are read-only ("+status.Convert(err).Message()+")")
 	}
 	return echo.NewHTTPError(code, "acsd: "+status.Convert(err).Message())
 }
