@@ -27,10 +27,12 @@ from magma.acsd.config import (
     CwmpAuthConfig,
     CwmpBind,
     CwmpWanConfig,
+    ReachConfig,
     get_cwmp_auth,
     get_cwmp_bind,
     get_cwmp_wan,
     get_cwmp_workers,
+    get_reach_config,
 )
 from magma.acsd.cpe_state import STATE_MAX_AGE_SEC, CpeViews
 from magma.acsd.credentials import CredentialStore
@@ -99,7 +101,7 @@ def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
 
 
 def make_claimed_mode(
-    wan: CwmpWanConfig, store: AcsStore, client,
+    wan: CwmpWanConfig, store: AcsStore, client, reach: ReachConfig = ReachConfig(),
 ) -> Optional[ClaimedMode]:
     """Claimed mode for the WAN listener, or None when it is off."""
     if not wan.enabled:
@@ -112,6 +114,7 @@ def make_claimed_mode(
     return ClaimedMode(
         ClaimRegistry(client), CredentialStore(client, wan.realm), store,
         wan.bootstrap_username, wan.bootstrap_password,
+        reach.periodic_inform_interval,
     )
 
 
@@ -203,7 +206,8 @@ def main():
         logging.info('Requeued %d tasks left in progress', requeued)
     auth = get_cwmp_auth(config)
     wan = get_cwmp_wan(config, auth)
-    claimed = make_claimed_mode(wan, store, client)
+    reach = get_reach_config(config, service.mconfig)
+    claimed = make_claimed_mode(wan, store, client, reach)
     frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
     handler = CwmpSessionHandler(
         identify=SessionIdentifier(), store=store, claimed=claimed,
