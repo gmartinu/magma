@@ -226,7 +226,10 @@ export function RetryButton({onClick}: {onClick: () => void}) {
 }
 
 // Fetches on mount, on deps change and every refreshMs; keeps the last good
-// data on error so the page can dim it instead of wiping the table.
+// data on error so the page can dim it instead of wiping the table. Only
+// the newest request lands: a slow answer for the previous deps (another
+// CPE, another range) must not overwrite the current one, and a deps
+// change clears the data so the old CPE's rows are not shown meanwhile.
 export function usePoll<T>(
   fetcher: () => Promise<T>,
   deps: Array<unknown>,
@@ -242,26 +245,45 @@ export function usePoll<T>(
   const [isLoading, setIsLoading] = useState(true);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  const latest = useRef(0);
 
   const reload = useCallback(() => {
+    const id = ++latest.current;
     fetcherRef
       .current()
       .then(result => {
-        setData(result);
-        setError(null);
+        if (id === latest.current) {
+          setData(result);
+          setError(null);
+        }
       })
-      .catch(err => setError(err))
-      .finally(() => setIsLoading(false));
+      .catch(err => {
+        if (id === latest.current) {
+          setError(err);
+        }
+      })
+      .finally(() => {
+        if (id === latest.current) {
+          setIsLoading(false);
+        }
+      });
   }, []);
 
   useEffect(() => {
+    // The counter, not a DOM node: bumping it in the cleanup is the point.
+    const requests = latest;
+    setData(null);
+    setError(null);
     setIsLoading(true);
     reload();
-    if (refreshMs <= 0) {
-      return;
-    }
-    const timer = setInterval(reload, refreshMs);
-    return () => clearInterval(timer);
+    const timer = refreshMs > 0 ? setInterval(reload, refreshMs) : undefined;
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+      // Drop whatever is still in flight for these deps.
+      requests.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, refreshMs, ...deps]);
 
