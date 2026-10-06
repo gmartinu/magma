@@ -58,8 +58,8 @@ docker compose down                    # stop (add -v to drop the tmp and cert v
 Finally it releases the IP. Each run removes and re-adds the claim, so the
 claimed CPE bootstraps again and the test can run any number of times.
 
-eventd is not in the stack, so acsd's `cpe_session_completed` and
-`cpe_task_failed` events go nowhere here; the unit tests cover them.
+eventd is not in this stack, so acsd's `cpe_session_completed` and
+`cpe_task_failed` events go nowhere here; the e2e env below runs it.
 
 `configs/acsd.yml` sets a **dev-only** Digest credential (`acs-dev-cpe` /
 `acs-dev-only-not-a-secret`) and a **dev-only** claimed-mode bootstrap
@@ -141,6 +141,36 @@ admin@magma.test password1234`, then `yarn start:dev`. The NMS mirrors each
 organization to an Orc8r tenant with the organization's ID, so entitle that
 tenant (`PUT /tenants/{id}/entitlements/acs`), and turn on the `acs` feature
 flag for the organization (host portal, Features).
+
+### Metrics and the session log
+
+`orc8r/` also runs `prometheus-cache` (the controller pushes every gateway
+metric to it; amd64 only, emulated on arm64) and `prometheus`
+(`127.0.0.1:9090`), so acsd's series reach the metrics REST and the NMS
+charts. magmad's metricsd polls acsd every 30 s here. To give the core CPE
+radio KPIs (a refresh answered with drifting RSRP/RSRQ/SINR):
+
+```bash
+docker compose run --rm --entrypoint python3 cpe-sim \
+  /magma/lte/gateway/docker/acs-dev/orc8r/cpe_session.py --kpis --repeat 10 --interval 30
+curl -s 'http://127.0.0.1:9090/api/v1/query?query=acs_rsrp_dbm'
+curl $C 'https://localhost:9443/magma/v1/networks/acs_e2e/prometheus/query?query=acs_sinr_db'
+```
+
+eventd runs next to magmad, so acsd's `cpe_session_completed` and
+`cpe_task_failed` events are validated and handed to td-agent-bit. The
+rest of the log path is the `logs` profile (Elasticsearch with a 256 MB
+heap, fluentd installing its plugins at first start, td-agent-bit): about
+1 GB more.
+
+```bash
+(cd orc8r && docker compose --profile logs up -d elasticsearch fluentd)
+docker compose -f docker-compose.yaml -f docker-compose.orc8r.yaml --profile logs up -d td-agent-bit
+docker compose run --rm --entrypoint python3 cpe-sim \
+  /magma/lte/gateway/docker/acs-dev/orc8r/cpe_session.py
+curl $C 'https://localhost:9443/magma/v1/acs/acs_e2e/logs?cpe_key=IMSI001010000000001'
+curl $C 'https://localhost:9443/magma/v1/events/acs_e2e?streams=acsd'   # what the NMS reads
+```
 
 Entitlements are not enforced: `orc8r/overrides/orc8r/entitlements.yml`.
 Set `enforce: true`, then `docker compose exec controller supervisorctl
