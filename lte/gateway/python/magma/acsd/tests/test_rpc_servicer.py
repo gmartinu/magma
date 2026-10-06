@@ -26,7 +26,8 @@ from magma.acsd.config import MODE_CLAIMED, MODE_CORE
 from magma.acsd.config import ReachConfig
 from magma.acsd.cpe_state import CpeViews
 from magma.acsd.credentials import CredentialStore
-from magma.acsd.reach import Reacher
+from magma.acsd.connreq import Outcome
+from magma.acsd.reach import CONNECTION_REQUEST, FAILED, NEXT_INFORM, Reach, Reacher
 from magma.acsd.rpc_servicer import (
     CONNECTION_REQUEST_UNIMPLEMENTED,
     CpeManagerRpcServicer,
@@ -265,6 +266,52 @@ class CpeReachRpcTest(unittest.TestCase):
         self.assertEqual((got.reach, got.next_inform), (pb.CPE_REACH_UNSPECIFIED, 0.0))
 
 
+class ConnectionRequestRpcTest(unittest.TestCase):
+    def setUp(self):
+        self.clock = Clock()
+        self.store = AcsStore(fakeredis.FakeStrictRedis(), clock=self.clock)
+        self.views = CpeViews(self.store, 0, clock=self.clock)
+        self.requester = mock.Mock()
+        self.requester.request.return_value = Outcome(False, Reach(NEXT_INFORM, FAILED), 'HTTP 401')
+        self.servicer = CpeManagerRpcServicer(self.store, self.views, requester=self.requester)
+        self.context = mock.Mock()
+        self.store.count_inform(CLAIMED)
+
+    def test_answers_what_the_requester_did(self):
+        resp = self.servicer.ConnectionRequest(pb.ConnectionRequestRequest(cpe_key=CLAIMED), self.context)
+        self.assertEqual(
+            (resp.sent, resp.reach, resp.reason, resp.detail, resp.next_inform),
+            (False, pb.CPE_REACH_NEXT_INFORM, FAILED, 'HTTP 401', 10000.0 + 3600),
+        )
+        self.requester.request.assert_called_once_with(CLAIMED)
+        self.requester.request.return_value = Outcome(True, Reach(CONNECTION_REQUEST))
+        resp = self.servicer.ConnectionRequest(pb.ConnectionRequestRequest(cpe_key=CLAIMED), self.context)
+        self.assertEqual((resp.sent, resp.reach), (True, pb.CPE_REACH_CONNECTION_REQUEST))
+        self.context.set_code.assert_not_called()
+
+    def test_errors(self):
+        for request, code in (
+            (pb.ConnectionRequestRequest(), grpc.StatusCode.INVALID_ARGUMENT),
+            (pb.ConnectionRequestRequest(cpe_key=CPE), grpc.StatusCode.NOT_FOUND),
+        ):
+            context = mock.Mock()
+            self.servicer.ConnectionRequest(request, context)
+            context.set_code.assert_called_once_with(code)
+        frozen = CpeManagerRpcServicer(self.store, self.views, True, self.requester)
+        context = mock.Mock()
+        frozen.ConnectionRequest(pb.ConnectionRequestRequest(cpe_key=CLAIMED), context)
+        context.set_code.assert_called_once_with(grpc.StatusCode.FAILED_PRECONDITION)
+        self.requester.request.assert_not_called()
+
+    def test_enqueue_task_wakes_the_cpe(self):
+        self.servicer.EnqueueTask(
+            pb.EnqueueTaskRequest(cpe_key=CLAIMED, type=pb.CPE_TASK_TYPE_REBOOT), self.context,
+        )
+        self.requester.request_soon.assert_called_once_with(CLAIMED)
+        self.servicer.EnqueueTask(pb.EnqueueTaskRequest(cpe_key=CLAIMED), self.context)
+        self.requester.request_soon.assert_called_once()
+
+
 class MainServesCpeManagerTest(unittest.TestCase):
     def test_servicer_shares_the_handlers_store(self):
         service = mock.Mock(mconfig=mconfigs_pb2.AcsD())
@@ -276,8 +323,9 @@ class MainServesCpeManagerTest(unittest.TestCase):
                 mock.patch.object(main, 'CpeManagerRpcServicer') as servicer:
             main.main()
         handler = listen.call_args.args[1]
-        store, views, frozen = servicer.call_args.args
+        store, views, frozen, requester = servicer.call_args.args
         self.assertFalse(frozen)
+        self.assertIsNotNone(requester)
         self.assertFalse(handler.frozen)
         self.assertIs(store, handler.store)
         self.assertIs(views._store, handler.store)
