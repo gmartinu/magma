@@ -10,17 +10,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import AcsAPI, {ACS_LOGS_MAX_SIZE, AcsLog, AcsLogs} from './AcsAPI';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import CardTitleRow from '../../components/layout/CardTitleRow';
 import IconButton from '@mui/material/IconButton';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import Link from '@mui/material/Link';
 import ListIcon from '@mui/icons-material/List';
-import MagmaAPI from '../../api/MagmaAPI';
 import MenuItem from '@mui/material/MenuItem';
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -40,45 +41,29 @@ import {Link as RouterLink} from 'react-router-dom';
 import {colors} from '../../theme/default';
 import {cpePath, errorMessage, formatDuration, formatTime} from './AcsUtils';
 
-// acsd logs one cpe_session_completed event per CWMP session to eventd
-// (stream acsd, tag = cpe_key); the network log reads them back through the
-// Orc8r events API. Fields as in lte/swagger/cpe_acs_events.v1.yml.
-export const ACS_EVENT_STREAM = 'acsd';
+// acsd logs one cpe_session_completed event per CWMP session to eventd;
+// the ACS session log route reads them back (GET /acs/{network_id}/logs),
+// behind the acs entitlement like the rest of the ACS API.
 export const SESSION_EVENT = 'cpe_session_completed';
 
-export type SessionEvent = {
-  cpe_key?: string;
-  imsi?: string;
-  session_id?: string;
-  result?: string;
-  reason?: string;
-  started?: number;
-  ended?: number;
-  tasks_done?: number;
-  tasks_failed?: number;
-  faults?: number;
-};
+// Sessions per page; "Load more" adds a page, up to the route's maximum.
+export const SESSIONS_PAGE = 100;
 
 export async function fetchSessions(
   networkId: string,
   hours: number,
+  limit: number,
   cpeKey?: string,
-): Promise<Array<SessionEvent>> {
+): Promise<AcsLogs> {
   const end = new Date();
   const start = new Date(end.getTime() - hours * 3600 * 1000);
-  const res = await MagmaAPI.events.eventsNetworkIdGet({
-    networkId,
-    streams: ACS_EVENT_STREAM,
-    events: SESSION_EVENT,
-    tags: cpeKey,
-    size: '500',
+  return AcsAPI.searchLogs(networkId, {
+    event: SESSION_EVENT,
+    cpe_key: cpeKey,
     start: start.toISOString(),
     end: end.toISOString(),
+    size: Math.min(limit, ACS_LOGS_MAX_SIZE),
   });
-  return (res.data ?? []).map(e => ({
-    cpe_key: e.tag,
-    ...(e.value as SessionEvent),
-  }));
 }
 
 function SessionRow({
@@ -86,7 +71,7 @@ function SessionRow({
   networkId,
   showDevice,
 }: {
-  s: SessionEvent;
+  s: AcsLog;
   networkId: string;
   showDevice: boolean;
 }) {
@@ -163,17 +148,38 @@ export default function AcsSessionLog({
   const [hours, setHours] = useState(24);
   const [result, setResult] = useState('');
   const [search, setSearch] = useState('');
+  const [limit, setLimit] = useState(SESSIONS_PAGE);
   const {data, error, isLoading, reload} = usePoll(
-    () => fetchSessions(networkId, hours, cpeKey),
+    () => fetchSessions(networkId, hours, limit, cpeKey),
     [networkId, cpeKey, hours],
   );
+  // A bigger page refetches without clearing the rows already shown.
+  const firstLimit = useRef(true);
+  useEffect(() => {
+    if (firstLimit.current) {
+      firstLimit.current = false;
+      return;
+    }
+    reload();
+  }, [limit, reload]);
+  const changeRange = (h: number) => {
+    setHours(h);
+    setLimit(SESSIONS_PAGE);
+  };
   const showDevice = !cpeKey;
   const q = search.trim().toLowerCase();
-  const rows = (data ?? []).filter(
+  const loaded = data?.logs ?? [];
+  const total = data?.total_count ?? 0;
+  const rows = loaded.filter(
     s =>
       (!result || s.result === result) &&
       (!q || (s.cpe_key ?? '').toLowerCase().includes(q)),
   );
+  const filtered = Boolean(result || q);
+  const count =
+    total > loaded.length
+      ? `${filtered ? `${rows.length} of ` : ''}${loaded.length} of ${total}`
+      : `${rows.length}`;
   const rangeLabel = RANGES.find(([, h]) => h === hours)?.[0] ?? '';
 
   return (
@@ -181,9 +187,7 @@ export default function AcsSessionLog({
       <CardTitleRow
         icon={ListIcon}
         label={
-          cpeKey
-            ? `Sessions of this CPE (${rows.length})`
-            : `Sessions (${rows.length})`
+          cpeKey ? `Sessions of this CPE (${count})` : `Sessions (${count})`
         }
         filter={() => (
           <Box sx={{display: 'flex', gap: 1}}>
@@ -208,7 +212,7 @@ export default function AcsSessionLog({
               <MenuItem value="timed_out">Timed out</MenuItem>
               <MenuItem value="interrupted">Interrupted</MenuItem>
             </TextField>
-            <RangeSelect hours={hours} onChange={setHours} />
+            <RangeSelect hours={hours} onChange={changeRange} />
           </Box>
         )}
       />
@@ -256,6 +260,29 @@ export default function AcsSessionLog({
               )}
             </TableBody>
           </Table>
+        )}
+        {total > loaded.length && (
+          <Box
+            data-testid="acs-sessions-more"
+            sx={{display: 'flex', alignItems: 'center', gap: 2, p: 2}}>
+            {loaded.length < ACS_LOGS_MAX_SIZE ? (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() =>
+                  setLimit(Math.min(limit + SESSIONS_PAGE, ACS_LOGS_MAX_SIZE))
+                }>
+                Load more
+              </Button>
+            ) : null}
+            <span>
+              Showing the newest {loaded.length} of {total} sessions
+              {filtered ? '; the filters apply to those' : ''}
+              {loaded.length >= ACS_LOGS_MAX_SIZE
+                ? '. Pick a shorter range to see older ones.'
+                : '.'}
+            </span>
+          </Box>
         )}
       </AcsPaper>
     </>
