@@ -384,6 +384,68 @@ class PeriodicInformTest(unittest.TestCase):
 
 
 
+
+class BootstrapRefusedTest(unittest.TestCase):
+    """A rotated CPE logging in with the bootstrap credential."""
+
+    def setUp(self):
+        self.redis = fakeredis.FakeStrictRedis()
+        self.store = AcsStore(self.redis)
+        self.claims = ClaimRegistry(self.redis)
+        self.claims.add(OUI, PRODUCT, SERIAL, claim_id='titan-1')
+        self.now = 1000.0
+        self.creds = CredentialStore(self.redis, REALM, clock=lambda: self.now)
+        self.refused = []
+        observer = SimpleNamespace(
+            bootstrap_refused=lambda *args: self.refused.append(args),
+        )
+        self.mode = ClaimedMode(
+            self.claims, self.creds, self.store, BOOT_USER, BOOT_PASSWORD,
+            observers=[observer],
+        )
+        cred, _ = self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, cred.pending_generation)
+        self.old_user = cred.pending_username
+
+    def identify(self, username=BOOT_USER):
+        return self.mode.identify(NAT_IP, _inform(), username)
+
+    def test_refusal_is_reported(self):
+        self.assertIsNone(self.identify())
+        self.assertEqual(self.refused, [(KEY, SERIAL, NAT_IP)])
+        self.assertTrue(self.creds.get(KEY).rotated)
+
+    def test_approval_lets_it_bootstrap_once(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.assertEqual(self.identify(), KEY)
+        self.assertEqual(self.refused, [])
+        # The old credential is gone and the CPE rotates as a new one.
+        self.assertFalse(self.creds.get(KEY).rotated)
+        self.assertIsNone(self.creds.owner(self.old_user))
+        self.assertEqual(self.creds.rebootstrap_approval(KEY), 0.0)
+        # Used up: once rotated again, the bootstrap credential is refused.
+        cred, _ = self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, cred.pending_generation)
+        self.assertIsNone(self.identify())
+        self.assertEqual(len(self.refused), 1)
+
+    def test_expired_approval_is_refused(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.now += 601
+        self.assertIsNone(self.identify())
+        self.assertEqual(len(self.refused), 1)
+        self.assertTrue(self.creds.get(KEY).rotated)
+
+    def test_reset_drops_the_approval(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.creds.reset(KEY)
+        self.assertEqual(self.creds.rebootstrap_approval(KEY), 0.0)
+
+    def test_per_cpe_login_is_not_reported(self):
+        self.assertEqual(self.identify(self.old_user), KEY)
+        self.assertEqual(self.refused, [])
+
+
 class SessionCookieTest(unittest.TestCase):
     """Claimed sessions survive a reconnect through the InformResponse cookie."""
 

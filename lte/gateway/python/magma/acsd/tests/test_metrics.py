@@ -80,6 +80,12 @@ class CountersTest(unittest.TestCase):
         handler.handle_tr069_message(_ctx(), inform)
         self.assertEqual([delta[k] for k in keys], [2, 1, 1, 1, 0, 1, 1, 1])
 
+    def test_bootstrap_refused_by_cpe(self):
+        key = ('acs_bootstrap_refused_total', ('cpe_key', 'CLAIMt1'), ('serial', 'SN1'))
+        delta = Delta(key)
+        AcsMetrics().bootstrap_refused('CLAIMt1', 'SN1', '198.51.100.7')
+        self.assertEqual(delta[key], 1)
+
     def test_out_of_range_fault_codes_fold(self):
         delta = Delta(('acs_faults_total', ('code', 'other')))
         AcsMetrics().fault(123456)
