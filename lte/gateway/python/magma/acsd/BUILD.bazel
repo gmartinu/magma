@@ -48,11 +48,13 @@ py_library(
         ":acsd_lib",
         ":claimed",
         ":claims",
+        ":connreq",
         ":cpe_state",
         ":credentials",
         ":digest",
         ":events",
         ":metrics",
+        ":reach",
         ":rpc_servicer",
         ":server",
         ":session",
@@ -199,11 +201,34 @@ py_library(
 )
 
 py_library(
+    name = "reach",
+    srcs = ["reach.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":acsd_lib",
+        "//orc8r/gateway/python/magma/common/redis:containers",
+    ],
+)
+
+py_library(
+    name = "connreq",
+    srcs = ["connreq.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":acsd_lib",
+        ":reach",
+        requirement("requests"),
+    ],
+)
+
+py_library(
     name = "rpc_servicer",
     srcs = ["rpc_servicer.py"],
     visibility = ["//visibility:public"],
     deps = [
+        ":connreq",
         ":cpe_state",
+        ":reach",
         ":store",
         ":tasks",
         "//lte/protos:cpe_acs_python_grpc",
