@@ -15,6 +15,7 @@ package entitlements
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -93,13 +94,47 @@ func GetNetworkEntitlements(ctx context.Context, networkID string) (*protos.Netw
 	return res, mapErr(err)
 }
 
-// ForNetwork is the decision for feature on a network now.
+// LookupTimeout bounds an entitlement lookup, so a hung entitlements
+// service cannot stall an mconfig build or a REST call.
+const LookupTimeout = 5 * time.Second
+
+// lastKnown keeps the last NetworkEntitlements read for each network, so
+// an outage of the entitlements service falls back to what was last
+// decided instead of to "allowed". It holds the entitlements, not the
+// decision, so an entitlement that expires during the outage still
+// expires.
+var lastKnown sync.Map
+
+// fetchNetworkEntitlements is GetNetworkEntitlements; a variable so tests
+// can take the service down.
+var fetchNetworkEntitlements = GetNetworkEntitlements
+
+// ForNetwork is the decision for feature on a network now. When the
+// entitlements service cannot answer, it is the decision from the last
+// entitlements this process read for the network; it returns the error
+// only when there are none.
 func ForNetwork(ctx context.Context, networkID, feature string) (Decision, error) {
-	ne, err := GetNetworkEntitlements(ctx, networkID)
-	if err != nil {
+	ctx, cancel := context.WithTimeout(ctx, LookupTimeout)
+	defer cancel()
+	ne, err := fetchNetworkEntitlements(ctx, networkID)
+	if err == nil {
+		lastKnown.Store(networkID, ne)
+		return Decide(ne, feature, time.Now()), nil
+	}
+	cached, ok := lastKnown.Load(networkID)
+	if !ok {
 		return Decision{}, err
 	}
-	return Decide(ne, feature, time.Now()), nil
+	glog.Warningf("Cannot read the entitlements of network %s, using the last known ones: %v", networkID, err)
+	return Decide(cached.(*protos.NetworkEntitlements), feature, time.Now()), nil
+}
+
+// ForgetLastKnown drops the cached entitlements; for tests.
+func ForgetLastKnown() {
+	lastKnown.Range(func(k, _ interface{}) bool {
+		lastKnown.Delete(k)
+		return true
+	})
 }
 
 func mapErr(err error) error {
