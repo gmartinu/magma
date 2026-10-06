@@ -175,6 +175,50 @@ class ConcurrencyTest(CwmpListenerTest):
         self.assertEqual(errors, [])
 
 
+class SlowIdentityTest(CwmpListenerTest):
+    """The session handler (mobilityd, Redis) runs outside the spyne lock."""
+
+    def setUp(self):
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        calls = []
+
+        def identify(source_ip, inform):
+            calls.append(inform.DeviceId.SerialNumber)
+            if len(calls) == 1:
+                self.entered.set()
+                # A mobilityd RPC that takes its time.
+                self.release.wait(5)
+            return source_ip
+
+        self.identify = identify
+        super().setUp()
+
+    def test_slow_identity_does_not_block_other_cpes(self):
+        slow_reply = {}
+
+        def slow():
+            conn = self._conn()
+            slow_reply['resp'] = self._post(conn, _fixture('sim4000_inform.xml'))
+            conn.close()
+
+        thread = threading.Thread(target=slow)
+        thread.start()
+        self.assertTrue(self.entered.wait(5))
+        try:
+            conn = self._conn()
+            resp, body = self._post(conn, _fixture('synthetic_periodic_inform.xml'))
+            conn.close()
+            # Served while the first CPE's identity is still being resolved.
+            self.assertFalse(self.release.is_set())
+            self._assert_inform_response(resp, body, '42')
+        finally:
+            self.release.set()
+            thread.join(5)
+        # Each reply went to its own request.
+        self._assert_inform_response(*slow_reply['resp'], '1727697600000')
+
+
 class BodyLimitTest(unittest.TestCase):
     LIMIT = 4096
 
