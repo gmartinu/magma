@@ -19,7 +19,9 @@ import (
 	"magma/acs/cloud/go/acs"
 	acs_service "magma/acs/cloud/go/services/acs"
 	"magma/acs/cloud/go/services/acs/obsidian/handlers"
+	"magma/acs/cloud/go/services/acs/sessionlog"
 	"magma/orc8r/cloud/go/service"
+	"magma/orc8r/cloud/go/services/eventd/eventd_client"
 	"magma/orc8r/cloud/go/services/obsidian"
 	swagger_protos "magma/orc8r/cloud/go/services/obsidian/swagger/protos"
 	swagger_servicers "magma/orc8r/cloud/go/services/obsidian/swagger/servicers/protected"
@@ -31,7 +33,14 @@ func main() {
 		glog.Fatalf("Error creating %s service: %s", acs_service.ServiceName, err)
 	}
 
-	obsidian.AttachHandlers(srv.EchoServer, handlers.NewHandlers(handlers.NewSyncRPCCpeManagers()).GetHandlers())
+	h := handlers.NewHandlers(handlers.NewSyncRPCCpeManagers())
+	// The same Elasticsearch, from orc8r's elastic.yml, as the events API.
+	if es, err := eventd_client.GetElasticClient(); err != nil {
+		glog.Errorf("Session log search disabled: %s", err)
+	} else {
+		h.WithLogs(sessionlog.NewElastic(es))
+	}
+	obsidian.AttachHandlers(srv.EchoServer, h.GetHandlers())
 	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(acs_service.ServiceName))
 
 	err = srv.Run()
