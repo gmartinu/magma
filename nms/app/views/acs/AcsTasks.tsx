@@ -31,10 +31,11 @@ import {AcsTask, AcsTaskStatus} from './AcsAPI';
 import {TASK_LABELS, TASK_STATUS, formatTime, taskLabel} from './AcsUtils';
 import {colors} from '../../theme/default';
 
-export function taskResult(t: AcsTask): React.ReactNode {
+// runsAt says when a pending task runs (taskRunsAt).
+export function taskResult(t: AcsTask, runsAt?: string): React.ReactNode {
   switch (t.status) {
     case 'pending':
-      return 'Waiting for next Inform';
+      return runsAt ?? 'Waiting for next Inform';
     case 'in_progress':
       return 'Running inside a session';
     case 'failed':
@@ -78,7 +79,7 @@ function Json({label, value}: {label: string; value: unknown}) {
   );
 }
 
-function TaskRow({task}: {task: AcsTask}) {
+function TaskRow({task, runsAt}: {task: AcsTask; runsAt?: string}) {
   const [open, setOpen] = useState(task.status === 'failed');
   return (
     <>
@@ -105,7 +106,7 @@ function TaskRow({task}: {task: AcsTask}) {
           {task.attempts} / {task.max_attempts}
         </TableCell>
         <TableCell>{formatTime(task.deadline)}</TableCell>
-        <TableCell>{taskResult(task)}</TableCell>
+        <TableCell>{taskResult(task, runsAt)}</TableCell>
       </TableRow>
       {open && (
         <TableRow sx={{backgroundColor: colors.primary.concrete}}>
@@ -135,7 +136,13 @@ function TaskRow({task}: {task: AcsTask}) {
 }
 
 // Task history of a CPE, newest first (the API returns run order).
-export default function AcsTasks({tasks}: {tasks: Array<AcsTask>}) {
+export default function AcsTasks({
+  tasks,
+  runsAt,
+}: {
+  tasks: Array<AcsTask>;
+  runsAt?: string;
+}) {
   const [status, setStatus] = useState('');
   const [type, setType] = useState('');
   const rows = [...tasks]
@@ -204,7 +211,7 @@ export default function AcsTasks({tasks}: {tasks: Array<AcsTask>}) {
             </TableHead>
             <TableBody>
               {rows.map(t => (
-                <TaskRow key={t.id} task={t} />
+                <TaskRow key={t.id} task={t} runsAt={runsAt} />
               ))}
             </TableBody>
           </Table>

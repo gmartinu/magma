@@ -111,6 +111,39 @@ export function formatDuration(
   return sec < 60 ? `${sec.toFixed(1)} s` : `${Math.round(sec / 60)} min`;
 }
 
+const REACH_REASONS: Record<string, string> = {
+  behind_nat: 'the CPE is behind NAT',
+  no_url: 'the CPE gave no Connection Request URL',
+  no_credential: 'acsd has no Connection Request credential for it',
+  disabled: 'Connection Requests are off',
+  connection_request_failed: 'the last Connection Request failed',
+  frozen: 'acsd is frozen',
+};
+
+// When a queued task runs: now, when acsd can send the CPE a Connection
+// Request, else at its next Inform.
+export function taskRunsAt(
+  cpe: Pick<AcsCpe, 'reach' | 'reach_reason' | 'next_inform' | 'last_inform'>,
+  intervalSec: number,
+  now: Date = new Date(),
+): string {
+  if (cpe.reach === 'connection_request') {
+    return 'Runs now';
+  }
+  const {due, overdueSec} = nextInform(cpe, intervalSec, now);
+  const why = cpe.reach_reason ? REACH_REASONS[cpe.reach_reason] : undefined;
+  let when = 'At next check-in';
+  if (due && overdueSec > 0) {
+    when = 'At next check-in (overdue)';
+  } else if (due) {
+    when = `At next check-in (~${Math.max(
+      0,
+      Math.round((due.getTime() - now.getTime()) / 1000),
+    )} s)`;
+  }
+  return why ? `${when}: ${why}` : when;
+}
+
 // TR-069 DeviceId, the string an operator reads off the unit's label.
 export function deviceId(cpe: AcsCpe): string {
   const parts = [cpe.oui, cpe.product_class, cpe.serial_number].filter(Boolean);
@@ -167,17 +200,22 @@ export function numberOrNull(value?: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-// When the next periodic Inform is due, and whether it is late.
+// When the next periodic Inform is due, and whether it is late: acsd's
+// next_inform, or, from an acsd that does not report it, the last Inform
+// plus the interval.
 export function nextInform(
-  lastInform: string | undefined,
+  cpe: Pick<AcsCpe, 'next_inform' | 'last_inform'>,
   intervalSec: number,
   now: Date = new Date(),
 ): {due: Date | null; overdueSec: number} {
-  const last = toDate(lastInform);
-  if (!last) {
-    return {due: null, overdueSec: 0};
+  let due = toDate(cpe.next_inform);
+  if (!due) {
+    const last = toDate(cpe.last_inform);
+    if (!last) {
+      return {due: null, overdueSec: 0};
+    }
+    due = new Date(last.getTime() + intervalSec * 1000);
   }
-  const due = new Date(last.getTime() + intervalSec * 1000);
   return {
     due,
     overdueSec: Math.max(0, (now.getTime() - due.getTime()) / 1000),
