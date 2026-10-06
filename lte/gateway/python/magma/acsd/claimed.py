@@ -20,6 +20,17 @@ rotation that sets the per-CPE credential by SetParameterValues through the
 ordinary task queue; it becomes the only accepted one once the CPE applies
 it.
 
+Trust model: until rotation, a claimed CPE is trusted on its DeviceId
+(OUI, ProductClass, serial; printed on the box) plus the bootstrap
+credential, which every CPE of the gateway shares. Whoever presents both
+first gets the per-CPE credential. Once rotated, the bootstrap credential
+is refused for that CPE, so a hijack attempt with a copied serial, and a
+genuine CPE factory-reset in the field, look the same: a refused
+bootstrap login, reported as a cpe_bootstrap_refused event and the
+acs_bootstrap_refused_total counter. Recovery is an operator decision:
+`acsd_cli.py reset-credentials` (forget the credential) or
+`acsd_cli.py allow-rebootstrap` (one bootstrap login within a TTL).
+
 At BOOTSTRAP the session also sets a short PeriodicInformInterval: a carrier
 NAT usually keeps acsd from sending a Connection Request, so a queued task
 waits for the CPE's next periodic Inform, and the CPE's factory interval
@@ -30,7 +41,7 @@ import dataclasses
 import hmac
 import logging
 import threading
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 
 from magma.acsd import tasks
 from magma.acsd.claims import ClaimRegistry
@@ -46,6 +57,13 @@ CONFIGURE_PERIODIC_INFORM = 'configure_periodic_inform'
 INTERNAL_TYPES = (ROTATE_CREDENTIALS, CONFIGURE_PERIODIC_INFORM)
 ROTATION_TTL_SEC = 24 * 3600
 EVENT_BOOTSTRAP = '0 BOOTSTRAP'
+
+
+class ClaimedObserver(Protocol):
+    """Told of refused bootstrap logins (events, metrics). Must not block."""
+
+    def bootstrap_refused(self, cpe_key: str, serial: str, source_ip: str) -> None:
+        ...
 
 
 class ClaimedMode:
@@ -66,11 +84,13 @@ class ClaimedMode:
         bootstrap_username: str,
         bootstrap_password: str,
         periodic_inform_interval: int = 0,
+        observers: Sequence[ClaimedObserver] = (),
     ):
         """
         `periodic_inform_interval` (seconds) is set on every claimed CPE that
         Informs with BOOTSTRAP; 0 leaves the CPE's own.
         """
+        self._observers = tuple(observers)
         self._claims = claims
         self._credentials = credentials
         self._store = store
@@ -125,13 +145,26 @@ class ClaimedMode:
             logging.warning('acsd claimed: refusing %s without Digest', key)
             return None
         if self.is_bootstrap(username):
-            if self._credentials.get(key).rotated:
+            if not self._credentials.get(key).rotated:
+                return key
+            if self._credentials.take_rebootstrap(key):
+                with self._lock:
+                    self._passwords.pop(key, None)
                 logging.warning(
-                    'acsd claimed: refusing bootstrap credential from %s (%s): '
-                    'it has a per-CPE credential', key, source_ip,
+                    'acsd claimed: %s (serial %s, from %s) bootstraps again, as '
+                    'an operator allowed; its old credential is gone',
+                    key, serial, source_ip,
                 )
-                return None
-            return key
+                return key
+            logging.warning(
+                'acsd claimed: refusing bootstrap credential from %s (serial %s, '
+                '%s): it has a per-CPE credential. A factory reset or a copied '
+                'serial; acsd_cli.py reset-credentials or allow-rebootstrap '
+                'lets it in', key, serial, source_ip,
+            )
+            for observer in self._observers:
+                observer.bootstrap_refused(key, serial, source_ip)
+            return None
         owner = self._credentials.owner(username)
         if owner is None or owner.cpe_key != key:
             logging.warning(

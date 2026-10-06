@@ -37,6 +37,13 @@ SESSIONS_ENDED = Counter(
 FAULTS = Counter(
     'acs_faults_total', 'CWMP faults CPEs answered acsd requests with, by fault code.', ['code'],
 )
+# Only claimed CPEs get here, so the labels are bounded by the claims.
+BOOTSTRAP_REFUSED = Counter(
+    'acs_bootstrap_refused_total',
+    'Bootstrap logins refused because the claimed CPE has its own credential '
+    '(a factory reset or a copied serial).',
+    ['cpe_key', 'serial'],
+)
 TASKS_FINISHED = Counter(
     'acs_tasks_finished_total', 'Tasks that reached done, failed or expired.', ['status'],
 )
@@ -94,6 +101,9 @@ class AcsMetrics(StoreListener, SessionObserver):
 
     def session_ended(self, outcome: SessionOutcome) -> None:
         SESSIONS_ENDED.labels(outcome.result).inc()
+
+    def bootstrap_refused(self, cpe_key: str, serial: str, source_ip: str) -> None:
+        BOOTSTRAP_REFUSED.labels(cpe_key, serial[:64]).inc()
 
     def task_finished(self, task: Task) -> None:
         TASKS_FINISHED.labels(task.status).inc()

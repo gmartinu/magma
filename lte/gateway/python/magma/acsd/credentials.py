@@ -166,6 +166,8 @@ class CredentialStore:
         self._creds = hash_dict('credentials')
         # username -> cpe_key, for active and pending usernames.
         self._users = hash_dict('credential_users')
+        # cpe_key -> Unix time until which a rotated CPE may bootstrap again.
+        self._rebootstrap = hash_dict('rebootstrap_approvals')
         self._mutex = RedisMutex(client, '%s:credentials_lock' % prefix)
         self._depth = threading.local()
 
@@ -274,12 +276,43 @@ class CredentialStore:
             self._save(cred)
             return True
 
+    def allow_rebootstrap(self, cpe_key: str, ttl_sec: float) -> float:
+        """
+        Let a rotated CPE in once more with the bootstrap credential, within
+        `ttl_sec` (an operator approval, e.g. after a factory reset in the
+        field). Returns when the approval expires.
+        """
+        with self._locked():
+            until = self._clock() + max(1.0, ttl_sec)
+            self._rebootstrap[cpe_key] = until
+            return until
+
+    def rebootstrap_approval(self, cpe_key: str) -> float:
+        """When the CPE's re-bootstrap approval expires; 0 if it has none."""
+        until = float(self._rebootstrap.get(cpe_key) or 0)
+        return until if until > self._clock() else 0.0
+
+    def take_rebootstrap(self, cpe_key: str) -> bool:
+        """
+        Use the CPE's re-bootstrap approval: if unexpired, forget its
+        credentials (it bootstraps as new) and the approval. False if it
+        has none.
+        """
+        with self._locked():
+            until = self._rebootstrap.pop(cpe_key, None)
+            if not until or float(until) <= self._clock():
+                return False
+            self.reset(cpe_key)
+            return True
+
     def reset(self, cpe_key: str) -> None:
         """
         Forget every credential of the CPE, so it may bootstrap again: after
-        a factory reset, or when its claim goes away.
+        a factory reset, or when its claim goes away. A pending re-bootstrap
+        approval goes too.
         """
         with self._locked():
+            self._rebootstrap.pop(cpe_key, None)
             raw = self._creds.pop(cpe_key, None)
             if raw is None:
                 return
