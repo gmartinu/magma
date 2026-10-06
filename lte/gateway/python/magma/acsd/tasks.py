@@ -11,6 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
 from magma.acsd.datamodel import GENERIC, Handler, gpv_batches
@@ -34,6 +35,17 @@ FAULT_INTERNAL_ERROR = 9002
 FAULT_INVALID_ARGUMENTS = 9003
 FAULT_RESOURCES_EXCEEDED = 9004
 FAULT_INVALID_PARAMETER_NAME = 9005
+
+
+# Parameters only acsd itself sets (claimed.py, through internal tasks that
+# skip validate()): an operator SPV changing one would point the CPE at
+# another ACS or swap the credential acsd authenticates it with, locking
+# the CPE out until someone reaches it by hand.
+_ACSD_OWNED = re.compile(
+    r'(^|\.)ManagementServer\.(URL|Username|Password|'
+    r'ConnectionRequestUsername|ConnectionRequestPassword)$',
+    re.IGNORECASE,
+)
 
 
 class InvalidTask(ValueError):
@@ -65,6 +77,11 @@ def validate(task_type: str, args: Dict[str, Any]) -> None:
                 raise InvalidTask('%r is not a parameter name' % name)
             if typ and not typ.startswith('xsd:'):
                 raise InvalidTask('type %r of %s is not an xsd type' % (typ, name))
+            if _ACSD_OWNED.search(name):
+                raise InvalidTask(
+                    '%s is managed by acsd (ACS URL and credentials); use '
+                    'acsd_cli.py rotate-credentials or reset-credentials' % name,
+                )
     elif task_type == GET_PARAMETER_NAMES:
         if path and not path.endswith('.') and args.get('next_level'):
             raise InvalidTask("next_level needs a partial path ending in '.'")
