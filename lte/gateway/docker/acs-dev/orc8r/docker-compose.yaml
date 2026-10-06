@@ -87,6 +87,33 @@ services:
     cpus: 0.5
     mem_limit: 256m
 
+  # Metrics: the controller's orchestrator pushes every gateway metric to
+  # prometheus-cache over gRPC (orchestrator.yml prometheusGRPCPushAddress),
+  # Prometheus scrapes it, and metricsd answers the REST queries (the NMS
+  # charts) from prometheus:9090. The edge hub only ships amd64.
+  prometheus-cache:
+    image: facebookincubator/prometheus-edge-hub:1.1.0
+    platform: linux/amd64
+    command: ["-limit=500000", "-grpc-port=9092"]
+    cpus: 0.5
+    mem_limit: 256m
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    volumes:
+      - ../../../../../orc8r/cloud/docker/metrics-configs:/etc/prometheus:ro
+      - promdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "127.0.0.1:9090:9090"   # PromQL by hand
+    depends_on:
+      - prometheus-cache
+    cpus: 0.5
+    mem_limit: 512m
+
   # Database for the NMS dev server (`yarn start:dev` on the host, see
   # ../README.md): `docker compose --profile nms up -d nms-db`.
   nms-db:
@@ -111,3 +138,4 @@ networks:
 volumes:
   pgdata:
   nmsdata:
+  promdata:
