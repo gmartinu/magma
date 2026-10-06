@@ -23,6 +23,7 @@ from magma.acsd.claims import ClaimRegistry
 from magma.acsd.connreq import ConnectionRequester
 from magma.acsd.config import (
     AUTH_OFF,
+    DEFAULT_CWMP_MAX_BODY_BYTES,
     MODE_CLAIMED,
     MODE_CORE,
     CwmpAuthConfig,
@@ -31,6 +32,7 @@ from magma.acsd.config import (
     ReachConfig,
     get_cwmp_auth,
     get_cwmp_bind,
+    get_cwmp_max_body,
     get_cwmp_wan,
     get_cwmp_workers,
     get_reach_config,
@@ -126,6 +128,7 @@ def start_wan_listener(
     claimed: ClaimedMode,
     workers: int,
     cwmp,
+    max_body: int = DEFAULT_CWMP_MAX_BODY_BYTES,
 ) -> Optional[threading.Thread]:
     """
     Start the claimed listener, or log why it cannot start. A broken WAN
@@ -144,7 +147,7 @@ def start_wan_listener(
     )
     thread = start_cwmp_listener(
         wan.bind, handler, workers, authenticator,
-        mode=MODE_CLAIMED, ssl_context=context, cwmp=cwmp,
+        mode=MODE_CLAIMED, ssl_context=context, cwmp=cwmp, max_body=max_body,
     )
     logging.info(
         'CWMP claimed listener on https://%s:%d (%s)',
@@ -161,6 +164,7 @@ def start_cwmp_listener(
     mode: str = MODE_CORE,
     ssl_context=None,
     cwmp=None,
+    max_body: int = DEFAULT_CWMP_MAX_BODY_BYTES,
 ) -> threading.Thread:
     """
     Serve CWMP on `bind` from a daemon thread. If the listener dies, the
@@ -168,7 +172,7 @@ def start_cwmp_listener(
     a healthy-looking service that no CPE can reach.
     """
     server = make_cwmp_server(
-        bind, handler, workers, authenticator, mode, ssl_context, cwmp,
+        bind, handler, workers, authenticator, mode, ssl_context, cwmp, max_body,
     )
 
     def serve():
@@ -196,6 +200,7 @@ def main():
     config = load_service_config('acsd')
     bind = get_cwmp_bind(config, service.mconfig)
     workers = get_cwmp_workers(config)
+    max_body = get_cwmp_max_body(config)
     client = get_default_client()
     metrics = AcsMetrics(get_cpe_kpi_config(config))
     events = AcsEvents(EventEmitter().start())
@@ -221,9 +226,10 @@ def main():
     cwmp = make_cwmp_wsgi(handler)
     start_cwmp_listener(
         bind, handler, workers, make_authenticator(auth), cwmp=cwmp,
+        max_body=max_body,
     )
     if claimed is not None:
-        start_wan_listener(wan, handler, claimed, workers, cwmp)
+        start_wan_listener(wan, handler, claimed, workers, cwmp, max_body=max_body)
     logging.info(
         'acsd started in mode %s; CWMP on %s %s:%d (%d workers)',
         mconfigs_pb2.AcsD.Mode.Name(service.mconfig.mode),

@@ -32,6 +32,14 @@ from urllib.parse import urlsplit
 CONNECTION_STATE = 'acsd.connection'
 # WSGI environ key set to the authenticated Digest username.
 DIGEST_USERNAME = 'acsd.digest_username'
+# Set in the CONNECTION_STATE dict to have the listener close the TCP
+# connection once the current response is sent.
+CLOSE_CONNECTION = 'acsd.close'
+# A refused request's body is read and dropped up to this size, so the CPE
+# can re-POST on the same keep-alive connection; an Inform is a few KiB.
+# Past it, the connection is closed instead: reading megabytes for a
+# client that has not authenticated is what a memory DoS needs.
+DRAIN_LIMIT_BYTES = 64 * 1024
 
 HTTP_401 = '401 Unauthorized'
 
@@ -342,7 +350,8 @@ class DigestAuthMiddleware:
         if conn is not None:
             conn.pop(DIGEST_USERNAME, None)
         _log_refusal(source_ip, result)
-        _drain_body(environ)
+        if not _drain_body(environ) and conn is not None:
+            conn[CLOSE_CONNECTION] = True
         start_response(HTTP_401, [
             ('WWW-Authenticate', self._auth.challenge(stale=result.stale)),
             ('Content-Length', '0'),
@@ -367,9 +376,18 @@ def _log_refusal(source_ip: str, result: AuthResult) -> None:
         )
 
 
-def _drain_body(environ: dict) -> None:
-    # Unread body bytes would be parsed as the next request on the
-    # keep-alive connection the CPE re-POSTs on.
-    length = int(environ.get('CONTENT_LENGTH') or 0)
+def _drain_body(environ: dict) -> bool:
+    """
+    Read and drop the body, since unread bytes would be parsed as the next
+    request on the keep-alive connection. False, without reading, when it
+    is too large: the connection must be closed instead.
+    """
+    try:
+        length = int(environ.get('CONTENT_LENGTH') or 0)
+    except ValueError:
+        return False
+    if length > DRAIN_LIMIT_BYTES:
+        return False
     if length > 0:
         environ['wsgi.input'].read(length)
+    return True
