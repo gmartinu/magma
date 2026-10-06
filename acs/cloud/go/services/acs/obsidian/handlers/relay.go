@@ -35,11 +35,14 @@ const (
 	TasksPath      = CpePath + obsidian.UrlSep + "tasks"
 	TaskPath       = TasksPath + obsidian.UrlSep + ":task_id"
 	ParametersPath = CpePath + obsidian.UrlSep + "parameters"
+	// ConnectionRequestPath asks acsd to wake the CPE up now.
+	ConnectionRequestPath = CpePath + obsidian.UrlSep + "connection_request"
 
 	relayTimeout = 20 * time.Second
 
 	taskTypePrefix   = "CPE_TASK_TYPE_"
 	taskStatusPrefix = "CPE_TASK_STATUS_"
+	reachPrefix      = "CPE_REACH_"
 )
 
 // CpeManagers reaches acsd's CpeManager on a gateway. The returned close
@@ -70,23 +73,24 @@ func (h *Handlers) relayHandlers() []obsidian.Handler {
 		{Path: TasksPath, Methods: obsidian.GET, HandlerFunc: h.listTasks},
 		{Path: TasksPath, Methods: obsidian.POST, HandlerFunc: h.createTask},
 		{Path: TaskPath, Methods: obsidian.GET, HandlerFunc: h.getTask},
+		{Path: ConnectionRequestPath, Methods: obsidian.POST, HandlerFunc: h.connectionRequest},
 	}
 }
 
-// relay finds the gateway that reports the CPE and calls its acsd.
+// relay calls acsd on the gateway serving the CPE.
 func (h *Handlers) relay(c echo.Context, call func(context.Context, lte_protos.CpeManagerClient, string) error) error {
 	networkID, nerr := obsidian.GetNetworkId(c)
 	if nerr != nil {
 		return nerr
 	}
 	cpeKey := c.Param("cpe_key")
-	_, st, err := loadCpe(c.Request().Context(), networkID, cpeKey)
+	owner, _, err := h.loadCpe(networkID, cpeKey)
 	if err != nil {
 		return err
 	}
-	client, gwCtx, closeConn, err := h.cpes.Dial(st.ReporterID)
+	client, gwCtx, closeConn, err := h.cpes.Dial(owner.HardwareID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "gateway "+st.ReporterID+" unreachable: "+err.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "gateway "+owner.HardwareID+" unreachable: "+err.Error())
 	}
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(gwCtx, relayTimeout)
@@ -111,6 +115,10 @@ func relayError(err error) *echo.HTTPError {
 		code = http.StatusNotImplemented
 	case codes.Unavailable, codes.DeadlineExceeded:
 		code = http.StatusServiceUnavailable
+	case codes.FailedPrecondition:
+		// acsd answers FAILED_PRECONDITION only when frozen: the network's
+		// acs entitlement expired past grace and acsd changes nothing.
+		return echo.NewHTTPError(http.StatusConflict, "acsd is frozen: the acs entitlement of the network has expired, so CPEs are read-only ("+status.Convert(err).Message()+")")
 	}
 	return echo.NewHTTPError(code, "acsd: "+status.Convert(err).Message())
 }
@@ -179,6 +187,31 @@ func (h *Handlers) getTask(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, toTask(task))
 	})
+}
+
+func (h *Handlers) connectionRequest(c echo.Context) error {
+	return h.relay(c, func(ctx context.Context, client lte_protos.CpeManagerClient, cpeKey string) error {
+		res, err := client.ConnectionRequest(ctx, &lte_protos.ConnectionRequestRequest{CpeKey: cpeKey})
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, &models.AcsConnectionRequest{
+			Sent:       res.Sent,
+			Reach:      reachName(res.Reach),
+			Reason:     res.Reason,
+			NextInform: unixTime(res.NextInform),
+			Detail:     res.Detail,
+		})
+	})
+}
+
+// reachName is acsd's reach as cpe_acs spells it: connection_request,
+// next_inform, or empty.
+func reachName(r lte_protos.CpeReach) string {
+	if r == lte_protos.CpeReach_CPE_REACH_UNSPECIFIED {
+		return ""
+	}
+	return strings.ToLower(strings.TrimPrefix(r.String(), reachPrefix))
 }
 
 func toEnqueueRequest(req *models.AcsTaskRequest) *lte_protos.EnqueueTaskRequest {

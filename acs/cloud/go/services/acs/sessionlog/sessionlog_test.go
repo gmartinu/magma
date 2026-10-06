@@ -16,6 +16,7 @@ package sessionlog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -167,4 +168,45 @@ func TestSearchElasticError(t *testing.T) {
 
 	_, err = NewElastic(client).Search(context.Background(), Query{NetworkID: "n1", Size: 10})
 	assert.Error(t, err)
+	assert.False(t, errors.Is(err, ErrUnavailable), "a rejected search is not an outage")
+}
+
+func searchAgainst(t *testing.T, url string, timeout time.Duration) error {
+	client, err := elastic.NewSimpleClient(elastic.SetURL(url))
+	require.NoError(t, err)
+	_, err = NewElastic(client).WithTimeout(timeout).Search(context.Background(), Query{NetworkID: "n1", Size: 10})
+	return err
+}
+
+func TestSearchUnavailable(t *testing.T) {
+	refused := httptest.NewServer(http.NotFoundHandler())
+	refusedURL := refused.URL
+	refused.Close()
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"type":"cluster_block_exception","reason":"blocked"},"status":503}`)
+	}))
+	defer failing.Close()
+
+	block := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	}))
+	defer slow.Close()
+	defer close(block)
+
+	for name, url := range map[string]string{
+		"dns":     "http://elasticsearch.invalid:9200",
+		"refused": refusedURL,
+		"5xx":     failing.URL,
+		"timeout": slow.URL,
+	} {
+		err := searchAgainst(t, url, 200*time.Millisecond)
+		assert.True(t, errors.Is(err, ErrUnavailable), "%s: %v", name, err)
+	}
 }

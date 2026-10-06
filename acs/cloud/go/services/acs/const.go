@@ -14,3 +14,14 @@ limitations under the License.
 package acs
 
 const ServiceName = "acs"
+
+// DefaultStaleCpeAfterHours matches acsd, which stops reporting a CPE
+// silent for 7 days (cpe_state.py STATE_MAX_AGE_SEC).
+const DefaultStaleCpeAfterHours = 7 * 24
+
+// Config is the service's acs.yml.
+type Config struct {
+	// StaleCpeAfterHours: the CPE list leaves out CPEs whose last Inform
+	// is older, unless include_stale is set.
+	StaleCpeAfterHours int `yaml:"staleCpeAfterHours"`
+}

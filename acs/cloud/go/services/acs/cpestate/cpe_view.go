@@ -28,6 +28,10 @@ import (
 const (
 	ModeCore    = "core"
 	ModeClaimed = "claimed"
+
+	// acsd's reach values (lte/gateway/python/magma/acsd/reach.py).
+	ReachConnectionRequest = "connection_request"
+	ReachNextInform        = "next_inform"
 )
 
 // Serdes reads cpe_acs typed; lte registers it as untyped JSON.
@@ -49,6 +53,12 @@ type CpeView struct {
 	PendingTasks    int32                  `json:"pending_tasks"`
 	LastSession     *CpeSession            `json:"last_session"`
 	Model           map[string]interface{} `json:"model"`
+	// Reach is how queued tasks get to the CPE (ReachConnectionRequest or
+	// ReachNextInform), ReachReason why; NextInform is when the next
+	// periodic Inform is due. Empty or 0 from an acsd before PR #27.
+	Reach       string  `json:"reach"`
+	ReachReason string  `json:"reach_reason"`
+	NextInform  float64 `json:"next_inform"`
 }
 
 type CpeSession struct {

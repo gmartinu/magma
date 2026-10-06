@@ -43,6 +43,8 @@ type fakeAcsd struct {
 	cpe      *lte_protos.Cpe
 	cpeReq   *lte_protos.GetCpeRequest
 	task     *lte_protos.CpeTask
+	crReq    *lte_protos.ConnectionRequestRequest
+	crRes    *lte_protos.ConnectionRequestResponse
 	err      error
 }
 
@@ -72,8 +74,9 @@ func (f *fakeAcsd) GetCpe(_ context.Context, in *lte_protos.GetCpeRequest, _ ...
 	return f.cpe, f.err
 }
 
-func (f *fakeAcsd) ConnectionRequest(context.Context, *lte_protos.ConnectionRequestRequest, ...grpc.CallOption) (*lte_protos.ConnectionRequestResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "unused")
+func (f *fakeAcsd) ConnectionRequest(_ context.Context, in *lte_protos.ConnectionRequestRequest, _ ...grpc.CallOption) (*lte_protos.ConnectionRequestResponse, error) {
+	f.crReq = in
+	return f.crRes, f.err
 }
 
 const cpeKey = "IMSI001010000000001"
@@ -99,7 +102,7 @@ func setupRelay(t *testing.T) (*Handlers, *fakeAcsd) {
 	setupNetwork(t)
 	reportCpe(t, "hw2", titan(cpeKey, cpestate.ModeCore, true))
 	acsd := &fakeAcsd{}
-	return NewHandlers(acsd), acsd
+	return newHandlers(acsd), acsd
 }
 
 func TestCreateTaskRelaysToReportingGateway(t *testing.T) {
@@ -122,6 +125,19 @@ func TestCreateTaskRelaysToReportingGateway(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"max_attempts": 3.0}, task.Args)
 	assert.Equal(t, time.UnixMilli(1700000001500).UTC(), time.Time(task.Updated))
 	assert.Nil(t, task.Deadline)
+}
+
+func TestRelayGoesToTheServingGateway(t *testing.T) {
+	h, acsd := setupRelay(t)
+	acsd.task = rebootTask()
+	// hw1 still reports the CPE it served before, with an older Inform.
+	old := titan(cpeKey, cpestate.ModeCore, false)
+	old.LastInform -= 3600
+	reportCpe(t, "hw1", old)
+
+	rec := serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"hw2"}, acsd.dialedHwIDs)
 }
 
 func TestCreateTaskSetParameterValues(t *testing.T) {
@@ -156,9 +172,47 @@ func TestCreateTaskErrors(t *testing.T) {
 	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
+	acsd.err = status.Error(codes.FailedPrecondition, "frozen")
+	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "acs entitlement")
+
 	acsd.dialErr = errors.New("no SyncRPC stream for hw2")
 	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func TestConnectionRequest(t *testing.T) {
+	h, acsd := setupRelay(t)
+	acsd.crRes = &lte_protos.ConnectionRequestResponse{Sent: true, Reach: lte_protos.CpeReach_CPE_REACH_CONNECTION_REQUEST}
+	rec := serve(t, h, http.MethodPost, ConnectionRequestPath, "/", cpeParams(), "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"hw2"}, acsd.dialedHwIDs)
+	assert.Equal(t, cpeKey, acsd.crReq.CpeKey)
+	var got models.AcsConnectionRequest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, models.AcsConnectionRequest{Sent: true, Reach: "connection_request"}, got)
+
+	acsd.crRes = &lte_protos.ConnectionRequestResponse{
+		Reach: lte_protos.CpeReach_CPE_REACH_NEXT_INFORM, Reason: "behind_nat", NextInform: 1700000300,
+	}
+	rec = serve(t, h, http.MethodPost, ConnectionRequestPath, "/", cpeParams(), "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got = models.AcsConnectionRequest{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.False(t, got.Sent)
+	assert.Equal(t, "next_inform", got.Reach)
+	assert.Equal(t, "behind_nat", got.Reason)
+	require.NotNil(t, got.NextInform)
+	assert.Equal(t, time.Unix(1700000300, 0).UTC(), time.Time(*got.NextInform))
+
+	acsd.err = status.Error(codes.FailedPrecondition, "frozen")
+	rec = serve(t, h, http.MethodPost, ConnectionRequestPath, "/", cpeParams(), "")
+	assert.Equal(t, http.StatusConflict, rec.Code)
+
+	acsd.err = nil
+	rec = serve(t, h, http.MethodPost, ConnectionRequestPath, "/", cpeParams("cpe_key", "IMSI9"), "")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestGetTask(t *testing.T) {

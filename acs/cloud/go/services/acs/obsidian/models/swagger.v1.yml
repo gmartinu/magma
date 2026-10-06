@@ -45,6 +45,9 @@ paths:
       description: >
         Read from the cpe_acs state each AGW reports, so CPEs of an AGW that is
         offline still appear, with online false once the report is stale.
+        When several AGWs report one cpe_key, the one with the newest Inform
+        serves it. CPEs silent longer than the stale horizon (7 days by
+        default) are left out unless include_stale is true.
       tags:
         - ACS
       parameters:
@@ -72,6 +75,11 @@ paths:
           enum:
             - core
             - claimed
+        - in: query
+          name: include_stale
+          description: Also list CPEs whose last Inform is past the stale horizon
+          required: false
+          type: boolean
       responses:
         '200':
           description: CPEs of the network, ordered by cpe_key
@@ -144,9 +152,9 @@ paths:
     post:
       summary: Queue a task, run in the next CWMP session of the CPE
       description: >
-        Relayed to acsd on the AGW that last reported the CPE. 400 for a
-        malformed task, 404 for a CPE no AGW reports, 503 when the AGW is
-        unreachable.
+        Relayed to acsd on the AGW serving the CPE. 400 for a malformed task,
+        404 for a CPE no AGW reports, 409 when acsd is frozen (the acs
+        entitlement expired), 503 when the AGW is unreachable.
       tags:
         - ACS
       parameters:
@@ -162,6 +170,28 @@ paths:
           description: The queued task
           schema:
             $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/cpes/{cpe_key}/connection_request:
+    post:
+      summary: Ask the CPE to open a CWMP session now
+      description: >
+        Relayed to acsd on the AGW serving the CPE, which sends a TR-069
+        Connection Request when the CPE's reach allows it (see reach on the
+        CPE); otherwise the CPE's queued tasks wait for its next Inform. 404
+        for a CPE no AGW reports, 409 when acsd is frozen, 503 when the AGW
+        is unreachable.
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: '#/parameters/acs_cpe_key'
+      responses:
+        '200':
+          description: What acsd did
+          schema:
+            $ref: '#/definitions/acs_connection_request'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
@@ -276,6 +306,13 @@ definitions:
         type: string
         minLength: 1
         example: IMSI001010000000001
+      conflicting_gateway_ids:
+        description: >
+          Other gateways that report this cpe_key online too: a claim ID used
+          on two AGWs, or a CPE that just moved to gateway_id
+        type: array
+        items:
+          type: string
       mode:
         x-nullable: false
         type: string
@@ -320,10 +357,26 @@ definitions:
       pending_tasks:
         type: integer
         format: int32
+      reach:
+        description: >
+          How queued tasks get to the CPE: connection_request (acsd asks the
+          CPE to open a session, the tasks run within seconds) or next_inform
+          (they wait for next_inform); empty when acsd does not say
+        type: string
+      reach_reason:
+        description: >
+          Why reach is next_inform: behind_nat, no_url, no_credential,
+          disabled, connection_request_failed or frozen
+        type: string
+      next_inform:
+        description: When the next periodic Inform is due; in the past when the CPE is late, absent before its first Inform
+        x-nullable: true
+        type: string
+        format: date-time
       last_session:
         $ref: '#/definitions/acs_cpe_session'
       gateway_id:
-        description: Gateway whose acsd last reported the CPE; empty if unregistered
+        description: Gateway serving the CPE (the newest Inform); empty if unregistered
         x-nullable: false
         type: string
       hardware_id:
@@ -334,6 +387,31 @@ definitions:
         x-nullable: false
         type: string
         format: date-time
+
+  acs_connection_request:
+    description: What acsd did with a Connection Request
+    type: object
+    required:
+      - sent
+    properties:
+      sent:
+        description: The CPE accepted it and should open a session now
+        x-nullable: false
+        type: boolean
+      reach:
+        description: >
+          next_inform when not sent, or connection_request with reason
+          in_session when the CPE has a session open
+        type: string
+      reason:
+        type: string
+      next_inform:
+        x-nullable: true
+        type: string
+        format: date-time
+      detail:
+        description: Why it failed, the HTTP status or the error
+        type: string
 
   acs_cpe_session:
     description: How the last CWMP session of a CPE ended

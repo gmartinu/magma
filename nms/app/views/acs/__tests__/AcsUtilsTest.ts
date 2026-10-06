@@ -29,10 +29,12 @@ import {
   modelValue,
   nextInform,
   signalBars,
+  taskRunsAt,
   toDate,
 } from '../AcsUtils';
 import {
   byLabel,
+  cpeKpiQuery,
   cpeSelector,
   latestSignal,
   stepFor,
@@ -89,11 +91,46 @@ describe('AcsUtils', () => {
 
   it('computes the next Inform and how late it is', () => {
     const now = new Date('2026-10-01T14:40:00Z');
-    const onTime = nextInform('2026-10-01T14:38:00Z', 300, now);
+    const onTime = nextInform({last_inform: '2026-10-01T14:38:00Z'}, 300, now);
     expect(onTime.due?.toISOString()).toBe('2026-10-01T14:43:00.000Z');
     expect(onTime.overdueSec).toBe(0);
-    expect(nextInform('2026-10-01T14:00:00Z', 300, now).overdueSec).toBe(2100);
-    expect(nextInform(undefined, 300, now).due).toBeNull();
+    expect(
+      nextInform({last_inform: '2026-10-01T14:00:00Z'}, 300, now).overdueSec,
+    ).toBe(2100);
+    expect(nextInform({}, 300, now).due).toBeNull();
+    // acsd's next_inform wins over the interval the page assumes.
+    expect(
+      nextInform(
+        {
+          last_inform: '2026-10-01T14:38:00Z',
+          next_inform: '2026-10-01T14:39:00Z',
+        },
+        300,
+        now,
+      ).overdueSec,
+    ).toBe(60);
+  });
+
+  it('says when a queued task runs', () => {
+    const now = new Date('2026-10-01T14:40:00Z');
+    expect(taskRunsAt({reach: 'connection_request'}, 300, now)).toBe(
+      'Runs now',
+    );
+    expect(
+      taskRunsAt(
+        {
+          reach: 'next_inform',
+          reach_reason: 'behind_nat',
+          next_inform: '2026-10-01T14:41:30Z',
+        },
+        300,
+        now,
+      ),
+    ).toBe('At next check-in (~90 s): the CPE is behind NAT');
+    expect(taskRunsAt({next_inform: '2026-10-01T14:30:00Z'}, 300, now)).toBe(
+      'At next check-in (overdue)',
+    );
+    expect(taskRunsAt({}, 300, now)).toBe('At next check-in');
   });
 
   it('formats durations and uptimes', () => {
@@ -118,6 +155,9 @@ describe('AcsMetrics', () => {
   it('escapes the cpe_key in PromQL selectors', () => {
     expect(cpeSelector('acs_rsrp_dbm', 'IMSI1')).toBe(
       'acs_rsrp_dbm{cpe_key="IMSI1"}',
+    );
+    expect(cpeKpiQuery('acs_sinr_db', 'IMSI1')).toBe(
+      'max by (cpe_key) (acs_sinr_db{cpe_key="IMSI1"})',
     );
     expect(cpeSelector('acs_rsrp_dbm', 'a"b\\c')).toBe(
       'acs_rsrp_dbm{cpe_key="a\\"b\\\\c"}',
@@ -168,7 +208,12 @@ describe('AcsMetrics', () => {
               result: [
                 {
                   metric: {cpe_key: 'IMSI1'} as never,
-                  value: ['1', query === 'acs_rsrp_dbm' ? '-84' : '14.5'],
+                  value: [
+                    '1',
+                    query === 'max by (cpe_key) (acs_rsrp_dbm)'
+                      ? '-84'
+                      : '14.5',
+                  ],
                 },
               ],
             },
@@ -218,6 +263,33 @@ describe('AcsAPI', () => {
     ).toHaveBeenCalledWith(
       '/nms/apicontroller/magma/v1/acs/net1/cpes/IMSI1/tasks',
       {type: 'reboot'},
+    );
+  });
+
+  it('searches the session log and sends Connection Requests', async () => {
+    const page = {total_count: 3, logs: []};
+    const get = jest.spyOn(axios, 'get').mockResolvedValue({data: page});
+    const post = jest
+      .spyOn(axios, 'post')
+      .mockResolvedValue({data: {sent: true}});
+    expect(
+      await AcsAPI.searchLogs('net1', {
+        event: 'cpe_session_completed',
+        cpe_key: 'IMSI1',
+        size: 100,
+      }),
+    ).toEqual(page);
+    expect(get).toHaveBeenCalledWith(
+      '/nms/apicontroller/magma/v1/acs/net1/logs',
+      {
+        params: {event: 'cpe_session_completed', cpe_key: 'IMSI1', size: 100},
+      },
+    );
+    expect(await AcsAPI.connectionRequest('net1', 'CLAIM 1')).toEqual({
+      sent: true,
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/nms/apicontroller/magma/v1/acs/net1/cpes/CLAIM%201/connection_request',
     );
   });
 });

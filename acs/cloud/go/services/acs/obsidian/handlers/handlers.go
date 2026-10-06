@@ -15,7 +15,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sort"
 	"time"
@@ -24,17 +23,15 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"magma/acs/cloud/go/acs"
+	acs_service "magma/acs/cloud/go/services/acs"
 	"magma/acs/cloud/go/services/acs/cpestate"
 	"magma/acs/cloud/go/services/acs/obsidian/models"
-	"magma/lte/cloud/go/lte"
+	"magma/acs/cloud/go/services/acs/reports"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/entitlements"
 	"magma/orc8r/cloud/go/services/entitlements/obsidian/guard"
 	"magma/orc8r/cloud/go/services/obsidian"
-	"magma/orc8r/cloud/go/services/state"
-	state_types "magma/orc8r/cloud/go/services/state/types"
-	"magma/orc8r/lib/go/merrors"
 )
 
 const (
@@ -45,16 +42,47 @@ const (
 	// magmad reports state every minute; past this the AGW is taken as
 	// gone and its CPEs as offline, whatever acsd last said.
 	stateStaleAfter = 10 * time.Minute
+
+	defaultStaleCpeAfter = acs_service.DefaultStaleCpeAfterHours * time.Hour
 )
 
-type Handlers struct {
-	cpes CpeManagers
-	logs LogSearcher
-	now  func() time.Time
+// CpeReports reads what each gateway reports of the CPEs; reports.Store
+// in production.
+type CpeReports interface {
+	List(networkID string) (map[string][]reports.Report, error)
+	Get(networkID, cpeKey string) ([]reports.Report, error)
 }
 
-func NewHandlers(cpes CpeManagers) *Handlers {
-	return &Handlers{cpes: cpes, now: time.Now}
+type Handlers struct {
+	cpes          CpeManagers
+	reports       CpeReports
+	logs          LogSearcher
+	now           func() time.Time
+	staleCpeAfter time.Duration
+}
+
+func NewHandlers(cpes CpeManagers, cpeReports CpeReports) *Handlers {
+	return &Handlers{cpes: cpes, reports: cpeReports, now: time.Now, staleCpeAfter: defaultStaleCpeAfter}
+}
+
+// WithStaleCpeAfter sets how old a CPE's last Inform may be for the CPE
+// list to show it by default; 0 or less keeps the default (7 days).
+func (h *Handlers) WithStaleCpeAfter(d time.Duration) *Handlers {
+	if d > 0 {
+		h.staleCpeAfter = d
+	}
+	return h
+}
+
+// stale reports whether r's CPE has been silent past the horizon. Nothing
+// deletes a cpe_acs row from Orc8r (acsd stops reporting a CPE after 7
+// days, the cloud keeps the last report), so the list hides such rows.
+func (h *Handlers) stale(r reports.Report) bool {
+	last := time.UnixMilli(int64(r.View.LastInform * 1000))
+	if r.View.LastInform <= 0 {
+		last = time.UnixMilli(int64(r.TimeMs))
+	}
+	return h.now().Sub(last) > h.staleCpeAfter
 }
 
 func (h *Handlers) GetHandlers() []obsidian.Handler {
@@ -91,7 +119,7 @@ func (h *Handlers) listCpes(c echo.Context) error {
 		return nerr
 	}
 	ctx := c.Request().Context()
-	states, err := state.SearchStates(ctx, networkID, []string{lte.CPEAcsStateType}, nil, nil, cpestate.Serdes)
+	byKey, err := h.reports.List(networkID)
 	if err != nil {
 		return obsidian.MakeHTTPError(err, http.StatusInternalServerError)
 	}
@@ -108,15 +136,25 @@ func (h *Handlers) listCpes(c echo.Context) error {
 		}
 		online = &b
 	}
+	includeStale := false
+	if v := c.QueryParam("include_stale"); v != "" {
+		if v != "true" && v != "false" {
+			return echo.NewHTTPError(http.StatusBadRequest, "include_stale must be true or false")
+		}
+		includeStale = v == "true"
+	}
 	model, gatewayID, mode := c.QueryParam("model"), c.QueryParam("gateway_id"), c.QueryParam("mode")
 
 	out := []*models.AcsCpe{}
-	for _, st := range states {
-		view, ok := st.ReportedState.(*cpestate.CpeView)
-		if !ok {
+	for _, rs := range byKey {
+		if len(rs) == 0 {
 			continue
 		}
-		cpe := h.toCpe(view, st, gateways)
+		owner, others := reports.Resolve(rs)
+		if !includeStale && h.stale(owner) {
+			continue
+		}
+		cpe := h.toCpe(owner, others, gateways)
 		if model != "" && model != cpe.ModelName && model != cpe.ProductClass {
 			continue
 		}
@@ -141,7 +179,7 @@ func (h *Handlers) getCpe(c echo.Context) error {
 		return nerr
 	}
 	ctx := c.Request().Context()
-	view, st, err := loadCpe(ctx, networkID, c.Param("cpe_key"))
+	owner, others, err := h.loadCpe(networkID, c.Param("cpe_key"))
 	if err != nil {
 		return err
 	}
@@ -149,24 +187,21 @@ func (h *Handlers) getCpe(c echo.Context) error {
 	if err != nil {
 		return obsidian.MakeHTTPError(err, http.StatusInternalServerError)
 	}
-	return c.JSON(http.StatusOK, &models.AcsCpeDetail{Cpe: *h.toCpe(view, st, gateways), Model: view.Model})
+	return c.JSON(http.StatusOK, &models.AcsCpeDetail{Cpe: *h.toCpe(owner, others, gateways), Model: owner.View.Model})
 }
 
-// loadCpe reads a CPE's state; its ReporterID is the gateway serving it,
-// so the state store doubles as the cpe_key -> gateway index.
-func loadCpe(ctx context.Context, networkID, cpeKey string) (*cpestate.CpeView, state_types.State, error) {
-	st, err := state.GetState(ctx, networkID, lte.CPEAcsStateType, cpeKey, cpestate.Serdes)
-	if errors.Is(err, merrors.ErrNotFound) {
-		return nil, st, echo.NewHTTPError(http.StatusNotFound, "no gateway reports CPE "+cpeKey)
-	}
+// loadCpe reads what the gateways report of a CPE and resolves the one
+// serving it (reports.Resolve).
+func (h *Handlers) loadCpe(networkID, cpeKey string) (reports.Report, []reports.Report, error) {
+	rs, err := h.reports.Get(networkID, cpeKey)
 	if err != nil {
-		return nil, st, obsidian.MakeHTTPError(err, http.StatusInternalServerError)
+		return reports.Report{}, nil, obsidian.MakeHTTPError(err, http.StatusInternalServerError)
 	}
-	view, ok := st.ReportedState.(*cpestate.CpeView)
-	if !ok {
-		return nil, st, echo.NewHTTPError(http.StatusInternalServerError, "malformed cpe_acs state")
+	if len(rs) == 0 {
+		return reports.Report{}, nil, echo.NewHTTPError(http.StatusNotFound, "no gateway reports CPE "+cpeKey)
 	}
-	return view, st, nil
+	owner, others := reports.Resolve(rs)
+	return owner, others, nil
 }
 
 func gatewayIDsByHwID(ctx context.Context, networkID string) (map[string]string, error) {
@@ -187,8 +222,15 @@ func gatewayIDsByHwID(ctx context.Context, networkID string) (map[string]string,
 	}
 }
 
-func (h *Handlers) toCpe(v *cpestate.CpeView, st state_types.State, gateways map[string]string) *models.AcsCpe {
-	reportedAt := time.UnixMilli(int64(st.TimeMs)).UTC()
+// online is the CPE's online flag as r's gateway reports it, false once
+// that report is stale.
+func (h *Handlers) online(r reports.Report) bool {
+	return r.View.Online && h.now().Sub(time.UnixMilli(int64(r.TimeMs))) <= stateStaleAfter
+}
+
+func (h *Handlers) toCpe(owner reports.Report, others []reports.Report, gateways map[string]string) *models.AcsCpe {
+	v := owner.View
+	reportedAt := time.UnixMilli(int64(owner.TimeMs)).UTC()
 	cpe := &models.AcsCpe{
 		CpeKey:          v.CpeKey,
 		Mode:            v.Mode,
@@ -201,11 +243,27 @@ func (h *Handlers) toCpe(v *cpestate.CpeView, st state_types.State, gateways map
 		Handler:         v.Handler,
 		LastInform:      unixTime(v.LastInform),
 		InformsTotal:    v.InformsTotal,
-		Online:          v.Online && h.now().Sub(reportedAt) <= stateStaleAfter,
+		Online:          h.online(owner),
 		PendingTasks:    v.PendingTasks,
-		GatewayID:       gateways[st.ReporterID],
-		HardwareID:      st.ReporterID,
+		Reach:           v.Reach,
+		ReachReason:     v.ReachReason,
+		NextInform:      unixTime(v.NextInform),
+		GatewayID:       gateways[owner.HardwareID],
+		HardwareID:      owner.HardwareID,
 		ReportedAt:      strfmt.DateTime(reportedAt),
+	}
+	// Claim IDs are chosen on each AGW (acsd_cli.py), so two AGWs can claim
+	// different CPEs under one key; Orc8r cannot refuse that, but it can show
+	// it.
+	for _, o := range others {
+		if !h.online(o) {
+			continue
+		}
+		id := gateways[o.HardwareID]
+		if id == "" {
+			id = o.HardwareID
+		}
+		cpe.ConflictingGatewayIds = append(cpe.ConflictingGatewayIds, id)
 	}
 	if cpe.Mode == "" {
 		cpe.Mode = cpestate.ModeCore

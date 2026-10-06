@@ -1,3 +1,4 @@
+---
 # Copyright 2026 The Magma Authors.
 
 # This source code is licensed under the BSD-style license found in the
@@ -9,19 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-services:
-  acs:
-    host: "localhost"
-    port: 9125
-    protected_port: 9225
-    echo_port: 10125
-    proxy_type: "clientcert"
-    labels:
-      orc8r.io/obsidian_handlers: "true"
-      orc8r.io/state_indexer: "true"
-      orc8r.io/swagger_spec: "true"
-    annotations:
-      orc8r.io/state_indexer_types: "cpe_acs"
-      orc8r.io/state_indexer_version: "1"
-      orc8r.io/obsidian_handlers_path_prefixes: >
-        /magma/v1/acs/:network_id,
+# The CPE list leaves out CPEs whose last Inform is older than this, unless
+# asked for them (include_stale). Orc8r never deletes a cpe_acs row: acsd
+# stops reporting a CPE silent for 7 days, and the cloud keeps its last
+# report.
+staleCpeAfterHours: 168

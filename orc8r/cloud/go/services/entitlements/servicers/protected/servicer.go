@@ -14,8 +14,13 @@ package servicers
 
 import (
 	"context"
+	"math"
 	"regexp"
+	"sort"
+	"sync"
 	"time"
+
+	"github.com/golang/glog"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,6 +34,11 @@ import (
 )
 
 var featurePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// tenantsTTL is how long the tenant list is reused. Every REST call of a
+// gated feature and every mconfig build asks for a network's tenant; a
+// tenant edit reaches entitlements at most this late.
+const tenantsTTL = 15 * time.Second
 
 // Config is the deployment's entitlements.yml.
 type Config struct {
@@ -48,6 +58,10 @@ type servicer struct {
 	config  Config
 	tenants TenantLister
 	now     func() time.Time
+
+	mu       sync.Mutex
+	cached   *tenant_protos.TenantList
+	cachedAt time.Time
 }
 
 // NewServicer serves Entitlements from store; tenants defaults to the
@@ -141,7 +155,7 @@ func (s *servicer) GetNetworkEntitlements(ctx context.Context, req *protos.Netwo
 		AllowUntenanted: s.config.AllowUntenanted,
 		Entitlements:    []*protos.Entitlement{},
 	}
-	list, err := s.tenants(ctx)
+	list, err := s.listTenants(ctx)
 	if err != nil && !s.config.Enforce {
 		// Nothing depends on the tenant when not enforcing.
 		return res, nil
@@ -149,18 +163,105 @@ func (s *servicer) GetNetworkEntitlements(ctx context.Context, req *protos.Netwo
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "listing tenants: %v", err)
 	}
+	var owners []int64
 	for _, t := range list.GetTenants() {
 		for _, n := range t.GetTenant().GetNetworks() {
-			if n != req.NetworkId {
-				continue
+			if n == req.NetworkId {
+				owners = append(owners, t.Id)
+				break
 			}
-			ents, err := s.store.List(t.Id)
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "listing entitlements: %v", err)
-			}
-			res.HasTenant, res.TenantId, res.Entitlements = true, t.Id, ents
-			return res, nil
 		}
 	}
+	if len(owners) == 0 {
+		return res, nil
+	}
+	sort.Slice(owners, func(i, j int) bool { return owners[i] < owners[j] })
+	if len(owners) > 1 {
+		glog.Warningf("Network %s is listed by tenants %v: the most restrictive entitlement of each feature applies", req.NetworkId, owners)
+	}
+	var lists [][]*protos.Entitlement
+	for _, id := range owners {
+		ents, err := s.store.List(id)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "listing entitlements: %v", err)
+		}
+		lists = append(lists, ents)
+	}
+	res.HasTenant, res.TenantId, res.Entitlements = true, owners[0], mostRestrictive(lists)
 	return res, nil
+}
+
+// listTenants is the tenant list, reused for tenantsTTL and while the
+// tenants service is down.
+func (s *servicer) listTenants(ctx context.Context) (*tenant_protos.TenantList, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cached != nil && s.now().Sub(s.cachedAt) < tenantsTTL {
+		return s.cached, nil
+	}
+	list, err := s.tenants(ctx)
+	if err != nil && s.cached != nil {
+		glog.Warningf("Listing tenants: %v; using the list from %s", err, s.cachedAt)
+		return s.cached, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.cached, s.cachedAt = list, s.now()
+	return list, nil
+}
+
+// mostRestrictive merges the entitlements of the tenants that list one
+// network: a feature is entitled only if every tenant has it, with the
+// terms that end access first. Neither tenant can grant the shared network
+// more than the other pays for, and the result does not depend on the
+// order the tenants service lists them in.
+func mostRestrictive(lists [][]*protos.Entitlement) []*protos.Entitlement {
+	if len(lists) == 1 {
+		return lists[0]
+	}
+	byFeature := map[string]*protos.Entitlement{}
+	counts := map[string]int{}
+	for _, ents := range lists {
+		for _, e := range ents {
+			counts[e.Feature]++
+			if cur, ok := byFeature[e.Feature]; !ok || stricter(e, cur) {
+				byFeature[e.Feature] = e
+			}
+		}
+	}
+	out := []*protos.Entitlement{}
+	for feature, e := range byFeature {
+		if counts[feature] == len(lists) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Feature < out[j].Feature })
+	return out
+}
+
+// stricter orders entitlements by when they stop allowing writes: disabled
+// first, then the earliest end of grace, then the earliest expiry.
+func stricter(a, b *protos.Entitlement) bool {
+	if a.Enabled != b.Enabled {
+		return !a.Enabled
+	}
+	if fa, fb := freezesAt(a), freezesAt(b); fa != fb {
+		return fa < fb
+	}
+	return expiresAt(a) < expiresAt(b)
+}
+
+func expiresAt(e *protos.Entitlement) int64 {
+	if e.NotAfter == 0 {
+		return math.MaxInt64
+	}
+	return e.NotAfter
+}
+
+func freezesAt(e *protos.Entitlement) int64 {
+	if e.NotAfter == 0 {
+		return math.MaxInt64
+	}
+	return e.NotAfter + int64(e.GraceDays)*int64(24*time.Hour/time.Second)
 }

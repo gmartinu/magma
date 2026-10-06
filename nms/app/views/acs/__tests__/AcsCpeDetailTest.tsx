@@ -43,7 +43,10 @@ describe('AcsCpeDetail', () => {
     expect(header).toHaveTextContent('agw01');
     expect(header).toHaveTextContent('6 d 4 h');
     expect(getByTestId('acs-pending-banner')).toHaveTextContent(
-      '1 task waiting for the next Inform: Reboot',
+      '1 task pending: Reboot',
+    );
+    expect(getByTestId('acs-pending-when')).toHaveTextContent(
+      /^At next check-in/,
     );
     // A reboot is already pending: the button says so instead of queueing
     // a second one.
@@ -58,7 +61,7 @@ describe('AcsCpeDetail', () => {
     expect(range).toHaveBeenCalledWith(
       expect.objectContaining({
         networkId: 'net1',
-        query: 'acs_rsrp_dbm{cpe_key="IMSI001010000000113"}',
+        query: 'max by (cpe_key) (acs_rsrp_dbm{cpe_key="IMSI001010000000113"})',
       }),
     );
   });

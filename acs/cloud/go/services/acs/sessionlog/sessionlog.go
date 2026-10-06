@@ -20,7 +20,10 @@ package sessionlog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/go-openapi/strfmt"
@@ -48,7 +51,15 @@ const (
 	fieldEventType = "event_type.keyword"
 	fieldTag       = "event_tag.keyword"
 	fieldTimestamp = "@timestamp"
+
+	// SearchTimeout bounds one search, so an Elasticsearch that does not
+	// answer fails the request instead of holding it open.
+	SearchTimeout = 10 * time.Second
 )
+
+// ErrUnavailable wraps the errors that mean Elasticsearch could not be
+// reached or could not serve the search: the log is down, not the query.
+var ErrUnavailable = errors.New("elasticsearch is unavailable")
 
 // Query selects records of one network; zero fields do not filter.
 type Query struct {
@@ -92,15 +103,25 @@ func (q Query) BoolQuery() *elastic.BoolQuery {
 
 // Elastic searches the records in Elasticsearch.
 type Elastic struct {
-	client *elastic.Client
+	client  *elastic.Client
+	timeout time.Duration
 }
 
 func NewElastic(client *elastic.Client) *Elastic {
-	return &Elastic{client: client}
+	return &Elastic{client: client, timeout: SearchTimeout}
+}
+
+// WithTimeout replaces SearchTimeout.
+func (e *Elastic) WithTimeout(d time.Duration) *Elastic {
+	e.timeout = d
+	return e
 }
 
 // Search returns one page of q, newest first, and how many records match.
+// Errors that mean Elasticsearch is down wrap ErrUnavailable.
 func (e *Elastic) Search(ctx context.Context, q Query) (*models.AcsLogs, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
 	res, err := e.client.Search().
 		Index(index).
 		Query(q.BoolQuery()).
@@ -110,6 +131,9 @@ func (e *Elastic) Search(ctx context.Context, q Query) (*models.AcsLogs, error) 
 		TrackTotalHits(true).
 		Do(ctx)
 	if err != nil {
+		if unavailable(err) {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
 		return nil, err
 	}
 	if res.Error != nil {
@@ -132,6 +156,21 @@ func (e *Elastic) Search(ctx context.Context, q Query) (*models.AcsLogs, error) 
 		out.Logs = append(out.Logs, l)
 	}
 	return out, nil
+}
+
+// unavailable tells whether err means Elasticsearch could not be reached
+// (no live node, DNS failure, refused connection, timeout) or failed on its
+// side (5xx), as opposed to a search it rejected.
+func unavailable(err error) bool {
+	if elastic.IsConnErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var esErr *elastic.Error
+	return errors.As(err, &esErr) && esErr.Status >= http.StatusInternalServerError
 }
 
 type document struct {
