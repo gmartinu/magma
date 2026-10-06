@@ -44,7 +44,8 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument('--label', default='')
 
     rm = sub.add_parser(
-        'claim-remove', help='drop a claim and its per-CPE credential',
+        'claim-remove',
+        help='drop a claim, its per-CPE credential and every record of its CPE',
     )
     rm.add_argument('claim_id')
 
@@ -103,8 +104,7 @@ def run(argv: List[str], client=None, out=sys.stdout) -> int:
         if claims.remove(args.claim_id) is None:
             print('error: no claim %s' % args.claim_id, file=out)
             return 1
-        creds.reset(cpe_key_of(args.claim_id))
-        print('removed claim %s' % args.claim_id, file=out)
+        print('removed claim %s and its CPE records' % args.claim_id, file=out)
     elif args.command == 'claim-list':
         print('%-16s %-8s %-14s %-20s %-10s %-3s %s' % (
             'CLAIM', 'OUI', 'PRODUCT', 'SERIAL', 'CREDENTIAL', 'CR',

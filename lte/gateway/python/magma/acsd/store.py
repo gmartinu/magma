@@ -191,9 +191,12 @@ class AcsStore:
     Task semantics follow the Go ACSStorage of the cloud ACS (claim,
     retry, fail, timeout).
 
-    acsd is the only writer of these keys, so compound updates are made
-    atomic with a process lock rather than Redis transactions; every single
-    write still lands in Redis, so a restarted acsd picks up where it was.
+    Compound updates are made atomic with a process lock rather than Redis
+    transactions; every single write still lands in Redis, so a restarted
+    acsd picks up where it was. That holds because acsd writes the records
+    of every CPE it serves; the one other writer, acsd_cli.py, only
+    deletes the records of a cpe_key with no claim (purge_cpe), which no
+    session can be serving.
     """
 
     def __init__(
@@ -482,6 +485,25 @@ class AcsStore:
         for task in self._all_tasks():
             counts[task.status] = counts.get(task.status, 0) + 1
         return counts
+
+    def purge_cpe(self, cpe_key: str) -> None:
+        """
+        Forget everything stored for a CPE: its sessions, tasks, parameter
+        snapshot, model, inform counters and last outcome. For a claim
+        removed or re-pointed at another device, so a CPE claimed later
+        under the same key starts clean.
+        """
+        with self._lock:
+            for session in self.list_sessions():
+                if session.cpe_key == cpe_key:
+                    self._sessions.pop(session.key, None)
+            # Tasks pruned from the queue but still stored included.
+            ids = set(self._queues.pop(cpe_key, None) or [])
+            ids.update(t.task_id for t in self._all_tasks() if t.cpe_key == cpe_key)
+            for task_id in ids:
+                self._tasks.pop(task_id, None)
+            for records in (self._params, self._models, self._informs, self._outcomes):
+                records.pop(cpe_key, None)
 
     # Internals
 

@@ -132,6 +132,14 @@ def assess(
     return Reach(CONNECTION_REQUEST, '', url, source_ip)
 
 
+def forget_attempt(client, cpe_key: str, prefix: str = 'acsd') -> None:
+    """Drop the last Connection Request attempt recorded for a CPE."""
+    RedisHashDict(
+        client, '%s:reach' % prefix,
+        get_json_serializer(), get_json_deserializer(),
+    ).pop(cpe_key, None)
+
+
 class Reacher:
     """
     Assesses the reach of each CPE from the store, the Connection Request
