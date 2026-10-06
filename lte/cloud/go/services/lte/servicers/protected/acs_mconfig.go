@@ -34,9 +34,11 @@ var acsEntitlement = func(ctx context.Context, networkID string) (entitlements.D
 
 // getAcsdMconfig builds acsd's mconfig from the network's ACS config. An
 // acs entitlement expired past its grace period forces FROZEN. When the
-// entitlement cannot be read the configured mode stands: a control-plane
-// outage must not change what the gateway does. A network not entitled
-// at all still gets the mconfig; magmad does not run acsd there (see the
+// entitlements service cannot answer, entitlements.ForNetwork decides from
+// the last entitlements it read; with none known (an Orc8r restart during
+// the outage) acsd runs FROZEN: it keeps answering its CPEs but changes
+// nothing until the entitlement is known again. A network not entitled at
+// all still gets the mconfig; magmad does not run acsd there (see the
 // orchestrator builder).
 func getAcsdMconfig(ctx context.Context, network *configurator.Network) *lte_mconfig.AcsD {
 	ret := &lte_mconfig.AcsD{LogLevel: protos.LogLevel_INFO, Mode: lte_mconfig.AcsD_ACTIVE}
@@ -50,7 +52,8 @@ func getAcsdMconfig(ctx context.Context, network *configurator.Network) *lte_mco
 	d, err := acsEntitlement(ctx, network.ID)
 	switch {
 	case err != nil:
-		glog.Warningf("acsd mconfig for network %s: cannot read the acs entitlement, keeping mode %s: %v", network.ID, ret.Mode, err)
+		glog.Warningf("acsd mconfig for network %s: no acs entitlement known, running acsd frozen: %v", network.ID, err)
+		ret.Mode = lte_mconfig.AcsD_FROZEN
 	case d.Frozen():
 		ret.Mode = lte_mconfig.AcsD_FROZEN
 	}
