@@ -144,6 +144,12 @@ acsNetworks.forEach(network => {
       });
     },
   );
+  server.get(`${acs}/logs`, (req, res) => {
+    res.status(200).jsonp({total_count: 0, logs: []});
+  });
+  server.post(`${acs}/cpes/:cpeKey/connection_request`, (req, res) => {
+    res.status(200).jsonp({sent: true, reach: 'connection_request'});
+  });
   server.get(`/magma/v1/networks/${network}/entitlements`, (req, res) => {
     res
       .status(200)
@@ -156,7 +162,7 @@ acsNetworks.forEach(network => {
   ) => {
     const query = String(req.query.query ?? '');
     const metric = ['acs_rsrp_dbm', 'acs_sinr_db', 'acs_rsrq_db'].find(m =>
-      query.startsWith(m),
+      query.includes(m),
     );
     if (!metric) {
       return next();
