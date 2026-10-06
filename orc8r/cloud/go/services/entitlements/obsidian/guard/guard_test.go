@@ -111,13 +111,15 @@ func TestAllowUntenanted(t *testing.T) {
 	assert.Equal(t, all(http.StatusForbidden), statuses("other"))
 }
 
-func TestLookupFailure(t *testing.T) {
+// ForNetwork errs only when no decision is known for the network (it
+// falls back to the last known one otherwise): no call may pass then.
+func TestLookupFailureWithNoKnownDecision(t *testing.T) {
 	saved := guard.ForNetwork
 	defer func() { guard.ForNetwork = saved }()
 	guard.ForNetwork = func(context.Context, string, string) (entitlements.Decision, error) {
 		return entitlements.Decision{}, errors.New("unreachable")
 	}
-	assert.Equal(t, readOnly(http.StatusServiceUnavailable), statuses("n1"))
+	assert.Equal(t, all(http.StatusServiceUnavailable), statuses("n1"))
 }
 
 func TestCheckEntitlementNeedsNetwork(t *testing.T) {
