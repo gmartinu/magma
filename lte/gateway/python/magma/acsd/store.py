@@ -96,6 +96,8 @@ class Session:
     tasks_done: int = 0
     tasks_failed: int = 0
     faults: int = 0
+    # Digest user of the Inform (claimed sessions).
+    username: str = ''
 
     @property
     def key(self) -> str:

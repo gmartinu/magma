@@ -147,6 +147,18 @@ class ClaimedMode:
                 logging.info('acsd claimed: %s confirmed credential %s', key, username)
         return key
 
+    def authenticates(self, cpe_key: str, username: Optional[str]) -> bool:
+        """
+        Whether Digest user `username` is one of the CPE's credentials:
+        the bootstrap one until it rotated, its active or pending one.
+        """
+        if not username:
+            return False
+        if self.is_bootstrap(username):
+            return not self._credentials.get(cpe_key).rotated
+        owner = self._credentials.owner(username)
+        return owner is not None and owner.cpe_key == cpe_key
+
     def session_started(
         self,
         cpe_key: str,

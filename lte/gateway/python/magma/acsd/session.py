@@ -13,6 +13,8 @@ limitations under the License.
 
 import ipaddress
 import logging
+import re
+import secrets
 import threading
 import time
 import uuid
@@ -33,7 +35,9 @@ from magma.acsd.datamodel import (
     device_info,
     fill_identity,
 )
-from magma.acsd.digest import DIGEST_USERNAME
+from http.cookies import CookieError, SimpleCookie
+
+from magma.acsd.digest import CONNECTION_STATE, DIGEST_USERNAME
 from magma.acsd.store import (
     SESSION_COMPLETED,
     TASK_FAILED,
@@ -74,17 +78,70 @@ def source_ip_of(ctx: WsgiMethodContext) -> str:
     return ctx.transport.req_env.get('REMOTE_ADDR', '')
 
 
+# Claimed sessions: the cookie set on the InformResponse names the session,
+# and the TCP connection's state remembers it for CPEs that ignore cookies.
+SESSION_COOKIE = 'acsd_session'
+_SESSION_KEY = 'acsd.session_key'
+_TOKEN = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
+
+
+def session_cookie_of(env: dict) -> str:
+    """The acsd session token the request's Cookie header carries, or ''."""
+    header = env.get('HTTP_COOKIE')
+    if not header:
+        return ''
+    try:
+        morsel = SimpleCookie(header).get(SESSION_COOKIE)
+    except CookieError:
+        return ''
+    value = morsel.value if morsel else ''
+    return value if _TOKEN.match(value) else ''
+
+
+def connection_key_of(env: dict) -> str:
+    return 'claimed/%s/%s' % (env.get('REMOTE_ADDR', ''), env.get('REMOTE_PORT', ''))
+
+
 def session_key_of(env: dict) -> str:
     """
     Core sessions are keyed by source IP: mtr0 addresses are unique per UE.
-    Claimed CPEs may share a carrier NAT address, so their session is the
-    TCP connection; a CPE that reconnects mid-session has its task retried
-    in the next session.
+    Claimed CPEs may share a carrier NAT address, so their session is named
+    by the cookie acsd set on the InformResponse; TR-069 (3.4.1) has CPEs
+    return it for the rest of the session, so one that reconnects mid-session
+    picks it up again. A CPE that ignores cookies is held to its TCP
+    connection.
     """
-    source_ip = env.get('REMOTE_ADDR', '')
     if env.get(LISTENER_MODE, MODE_CORE) != MODE_CLAIMED:
-        return source_ip
-    return 'claimed/%s/%s' % (source_ip, env.get('REMOTE_PORT', ''))
+        return env.get('REMOTE_ADDR', '')
+    cookie = session_cookie_of(env)
+    if cookie:
+        return 'claimed/s/%s' % cookie
+    conn = env.get(CONNECTION_STATE)
+    if conn and conn.get(_SESSION_KEY):
+        return conn[_SESSION_KEY]
+    return connection_key_of(env)
+
+
+def _start_claimed_session_key(ctx: WsgiMethodContext) -> str:
+    """
+    The key of a new claimed session: a fresh cookie when the response can
+    carry one, the connection otherwise.
+    """
+    env = ctx.transport.req_env
+    headers = getattr(ctx.transport, 'resp_headers', None)
+    if headers is None:
+        key = connection_key_of(env)
+    else:
+        token = secrets.token_urlsafe(24)
+        cookie = '%s=%s; Path=/; HttpOnly' % (SESSION_COOKIE, token)
+        if env.get('wsgi.url_scheme') == 'https':
+            cookie += '; Secure'
+        headers['Set-Cookie'] = cookie
+        key = 'claimed/s/%s' % token
+    conn = env.get(CONNECTION_STATE)
+    if conn is not None:
+        conn[_SESSION_KEY] = key
+    return key
 
 
 class CwmpSessionHandler:
@@ -99,7 +156,8 @@ class CwmpSessionHandler:
     IP, so a later message from the same IP belongs to the same CPE. On the
     claimed listener it is keyed by TCP connection (session_key_of). Keeping it next to the task
     claims means a session that times out, or dies with acsd, requeues its
-    task.
+    task. A claimed session found by its cookie on another connection only
+    continues for a Digest user of the same CPE.
 
     Thread-safe, and called concurrently by the listeners' worker threads
     (server.CwmpWsgiApp runs it outside the spyne lock): it keeps no
@@ -162,7 +220,14 @@ class CwmpSessionHandler:
         source_ip = source_ip_of(ctx)
         if isinstance(tr069_message, models.Inform):
             return self._handle_inform(ctx, source_ip, tr069_message)
-        session = self._store.get_session(session_key_of(ctx.transport.req_env))
+        env = ctx.transport.req_env
+        session = self._store.get_session(session_key_of(env))
+        if session is not None and not self._may_continue(session, env):
+            logging.warning(
+                'CPE %s presented the session cookie of %s as user %r; ignoring it',
+                source_ip, session.cpe_key, env.get(DIGEST_USERNAME),
+            )
+            session = None
         if session is None:
             if not isinstance(tr069_message, models.DummyInput):
                 logging.info(
@@ -209,6 +274,8 @@ class CwmpSessionHandler:
         # A new Inform means the CPE gave up on any session it had open.
         self._store.end_session(key, 'CPE started a new session')
         self._store.end_cpe_sessions(identity, 'CPE started a new session')
+        if mode == MODE_CLAIMED:
+            key = _start_claimed_session_key(ctx)
         values = _inform_values(inform)
         handler = self._registry.select(device_info(inform, values))
         session = Session(
@@ -220,6 +287,7 @@ class CwmpSessionHandler:
             created=time.time(),
             session_key=key if key != source_ip else '',
             mode=mode,
+            username=(username or '') if mode == MODE_CLAIMED else '',
         )
         self._store.put_session(session)
         self._store.count_inform(identity)
@@ -236,6 +304,16 @@ class CwmpSessionHandler:
             self._store.pending_count(identity),
         )
         return models.InformResponse(MaxEnvelopes=1)
+
+    def _may_continue(self, session: Session, env: dict) -> bool:
+        if session.mode != MODE_CLAIMED or self._claimed is None:
+            return True
+        username = env.get(DIGEST_USERNAME)
+        # The Inform's user stays good for the session even once a rotation
+        # in it retired that credential.
+        return (
+            bool(username) and username == session.username
+        ) or self._claimed.authenticates(session.cpe_key, username)
 
     def _handle_answer(self, session: Session, message: ComplexModelBase) -> None:
         method = session.pending_method
