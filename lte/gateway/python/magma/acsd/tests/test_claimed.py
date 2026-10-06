@@ -129,10 +129,17 @@ class ClaimedSessionTest(unittest.TestCase):
     def test_bootstrap_rotates_to_a_per_cpe_credential(self):
         spv = self.bootstrap_until_spv()
         values = _spv_values(spv)
-        self.assertEqual(set(values), {MS + 'Username', MS + 'Password'})
+        self.assertEqual(set(values), {
+            MS + 'Username', MS + 'Password',
+            MS + 'ConnectionRequestUsername', MS + 'ConnectionRequestPassword',
+        })
         username, password = values[MS + 'Username'], values[MS + 'Password']
         self.assertEqual(username, KEY + '.1')
         self.assertEqual(len(password), 32)
+        cr_password = values[MS + 'ConnectionRequestPassword']
+        self.assertEqual(values[MS + 'ConnectionRequestUsername'], username)
+        self.assertNotEqual(cr_password, password)
+        self.assertIsNone(self.creds.get(KEY).connection_request)
         # Not in use until the CPE accepts it.
         self.assertFalse(self.creds.get(KEY).rotated)
 
@@ -142,9 +149,11 @@ class ClaimedSessionTest(unittest.TestCase):
         self.assertTrue(cred.rotated)
         self.assertEqual(cred.ha1, ha1_of(username, REALM, password))
         self.assertEqual(self.mode.lookup(username, NAT_IP), cred.ha1)
+        self.assertEqual(cred.connection_request, (username, cr_password))
         [task] = self.store.list_tasks(KEY)
         self.assertEqual((task.type, task.status), (ROTATE_CREDENTIALS, TASK_DONE))
         self.assertNotIn(password, repr(task))
+        self.assertNotIn(cr_password, repr(task))
 
         # From now on only the per-CPE credential gets in.
         _, ctx = self.send(_inform(), port=40001)
@@ -164,6 +173,8 @@ class ClaimedSessionTest(unittest.TestCase):
             {
                 'InternetGatewayDevice.ManagementServer.Username',
                 'InternetGatewayDevice.ManagementServer.Password',
+                'InternetGatewayDevice.ManagementServer.ConnectionRequestUsername',
+                'InternetGatewayDevice.ManagementServer.ConnectionRequestPassword',
             },
         )
 
@@ -171,6 +182,7 @@ class ClaimedSessionTest(unittest.TestCase):
         self.bootstrap_until_spv()
         self.send(models.Fault(FaultCode=9001, FaultString='denied'))
         self.assertFalse(self.creds.get(KEY).rotated)
+        self.assertEqual(self.creds.get(KEY).pending_cr_password, '')
         self.assertIsNone(self.creds.owner(KEY + '.1'))
         self.assertEqual(self.store.list_tasks(KEY)[0].status, TASK_FAILED)
         spv = self.bootstrap_until_spv()
@@ -191,6 +203,10 @@ class ClaimedSessionTest(unittest.TestCase):
         resp, ctx = self.send(_inform(), username=username, port=40001)
         self.assertIsInstance(resp, models.InformResponse)
         self.assertTrue(self.creds.get(KEY).rotated)
+        self.assertEqual(
+            self.creds.get(KEY).connection_request[1],
+            _spv_values(spv)[MS + 'ConnectionRequestPassword'],
+        )
         # The requeued rotation has nothing left to send.
         end, _ = self.send(models.DummyInput(), username=username, port=40001)
         self.assertIsInstance(end, models.DummyInput)
@@ -244,6 +260,28 @@ class ClaimedSessionTest(unittest.TestCase):
         self.assertFalse(self.creds.get(KEY).rotated)
         resp, _ = self.send(_inform(), port=40002)
         self.assertIsInstance(resp, models.InformResponse)
+
+    def test_cpe_without_connection_request_credential_rotates_again(self):
+        # Rotated by an acsd from before Connection Request credentials.
+        self.creds.begin_rotation(KEY, 32)
+        self.creds.promote(KEY, 1)
+        self.creds.drop_connection_request(KEY)
+        old = KEY + '.1'
+        self.send(_inform(), username=old)
+        spv, _ = self.send(models.DummyInput(), username=old)
+        values = _spv_values(spv)
+        self.assertEqual(values[MS + 'Username'], KEY + '.2')
+        self.assertIn(MS + 'ConnectionRequestPassword', values)
+        # Until the CPE applies it, its current credential still gets in.
+        self.assertEqual(self.creds.owner(old).which, 'active')
+        self.send(models.SetParameterValuesResponse(Status=0), username=old)
+        cred = self.creds.get(KEY)
+        self.assertEqual(cred.connection_request[0], KEY + '.2')
+        self.assertIsNone(self.creds.owner(old))
+        # Nothing more to rotate in the next session.
+        self.send(_inform(), username=KEY + '.2', port=40001)
+        end, _ = self.send(models.DummyInput(), username=KEY + '.2', port=40001)
+        self.assertIsInstance(end, models.DummyInput)
 
     def test_wan_address_is_the_cpe_reported_one_not_the_nat(self):
         self.send(_inform(**{WAN_PARAM: '100.64.1.2'}))
