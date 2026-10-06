@@ -167,7 +167,13 @@ class ClaimedMode:
     def _maybe_rotate(
         self, cpe_key: str, username: Optional[str], handler: Handler,
     ) -> None:
-        if not self.is_bootstrap(username):
+        """
+        Rotate a CPE on the bootstrap credential, and one on its own that
+        has no Connection Request credential: rotated before acsd set those,
+        or told to by `acsd_cli.py rotate-credentials`.
+        """
+        bootstrap = self.is_bootstrap(username)
+        if not bootstrap and self._credentials.get(cpe_key).cr_password:
             return
         if handler.quirks.no_credential_rotation:
             logging.info(
@@ -198,8 +204,10 @@ class ClaimedMode:
             )
             self._credentials.set_rotation_task(cpe_key, task.task_id)
         logging.info(
-            'acsd claimed: %s on the bootstrap credential; rotation %s queued',
-            cpe_key, task.task_id,
+            'acsd claimed: %s %s; rotation %s queued', cpe_key,
+            'on the bootstrap credential' if bootstrap
+            else 'without a Connection Request credential',
+            task.task_id,
         )
 
     def _configure_periodic_inform(self, cpe_key: str, root: str) -> None:
@@ -255,19 +263,26 @@ class ClaimedMode:
     def _plan_rotation(self, task: Task, root: str) -> List[ComplexModelBase]:
         """The SetParameterValues of a rotation; [] when already applied."""
         generation = int(task.args.get('generation', 0))
-        if self._credentials.get(task.cpe_key).generation >= generation:
+        cred = self._credentials.get(task.cpe_key)
+        if cred.generation >= generation:
             return []
         with self._lock:
             held = self._passwords.get(task.cpe_key)
         if held is None or held[0] != generation:
             raise tasks.InvalidTask('rotation password lost (acsd restarted?)')
+        if cred.pending_generation != generation or not cred.pending_cr_password:
+            raise tasks.InvalidTask('rotation replaced or aborted')
         ms = root + 'ManagementServer.'
+        username = task.args['username']
+        # One SPV, so the CPE applies both credentials or neither.
         spv = dataclasses.replace(
             task,
             type=tasks.SET_PARAMETER_VALUES,
             args={'parameter_values': [
-                {'name': ms + 'Username', 'value': task.args['username']},
+                {'name': ms + 'Username', 'value': username},
                 {'name': ms + 'Password', 'value': held[1]},
+                {'name': ms + 'ConnectionRequestUsername', 'value': username},
+                {'name': ms + 'ConnectionRequestPassword', 'value': cred.pending_cr_password},
             ]},
         )
         return tasks.plan(spv, root)

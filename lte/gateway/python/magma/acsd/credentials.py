@@ -16,13 +16,21 @@ Only the Digest HA1 is stored, never the password. Every rotation gets a
 new username (cpe_key.generation), so an authenticated username alone says
 which credential the CPE used: the active one, or the pending one it
 applied in a session whose SPV answer acsd never saw.
+
+The same rotation sets the CPE's ConnectionRequestUsername/Password (the
+username is the ACS one, the password its own), so both are promoted, or
+dropped, together under one generation. Unlike the ACS password, the
+Connection Request password is kept in clear: acsd is the Digest client
+there, and the realm the CPE challenges with is only known when it does.
+It only lets its holder ask the CPE to open a session to the ACS URL the
+CPE already has, where the ACS credential is still required.
 """
 
 import secrets
 import threading
 import time
 from dataclasses import asdict, dataclass
-from typing import Callable, NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional, Tuple
 
 from magma.acsd.digest import Ha1, ha1_of
 from magma.common.redis.containers import RedisHashDict
@@ -46,11 +54,20 @@ class CpeCredential:
     pending_generation: int = 0
     rotation_task_id: str = ''
     updated: float = 0.0
+    cr_password: str = ''
+    pending_cr_password: str = ''
 
     @property
     def rotated(self) -> bool:
         """Has a per-CPE credential, so the bootstrap one is refused."""
         return bool(self.ha1)
+
+    @property
+    def connection_request(self) -> Optional[Tuple[str, str]]:
+        """(username, password) for a Connection Request, if acsd set one."""
+        if self.ha1 and self.cr_password:
+            return self.username, self.cr_password
+        return None
 
 
 class Owner(NamedTuple):
@@ -116,6 +133,7 @@ class CredentialStore:
             cred.pending_username = username
             cred.pending_ha1 = str(ha1_of(username, self.realm, password))
             cred.pending_generation = generation
+            cred.pending_cr_password = random_password(password_length)
             cred.rotation_task_id = ''
             self._save(cred)
             self._users[username] = cpe_key
@@ -141,7 +159,9 @@ class CredentialStore:
                 self._users.pop(cred.username, None)
             cred.username, cred.ha1 = cred.pending_username, cred.pending_ha1
             cred.generation = cred.pending_generation
+            cred.cr_password = cred.pending_cr_password
             cred.pending_username, cred.pending_ha1 = '', ''
+            cred.pending_cr_password = ''
             cred.rotation_task_id = ''
             self._save(cred)
             return True
@@ -154,8 +174,22 @@ class CredentialStore:
                 return
             self._users.pop(cred.pending_username, None)
             cred.pending_username, cred.pending_ha1 = '', ''
+            cred.pending_cr_password = ''
             cred.rotation_task_id = ''
             self._save(cred)
+
+    def drop_connection_request(self, cpe_key: str) -> bool:
+        """
+        Forget the Connection Request password, so the CPE's next session
+        rotates both its credentials. False when it had none.
+        """
+        with self._lock:
+            cred = self.get(cpe_key)
+            if not cred.cr_password:
+                return False
+            cred.cr_password = ''
+            self._save(cred)
+            return True
 
     def reset(self, cpe_key: str) -> None:
         """

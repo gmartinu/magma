@@ -56,6 +56,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     reset.add_argument('claim_id')
 
+    rotate = sub.add_parser(
+        'rotate-credentials',
+        help="give a claimed CPE new ACS and Connection Request credentials "
+        "at its next session (e.g. its Connection Requests get 401)",
+    )
+    rotate.add_argument('claim_id')
+
     cert = sub.add_parser(
         'dev-cert', help='write a self-signed cert/key for the WAN listener '
         '(development only)',
@@ -99,16 +106,18 @@ def run(argv: List[str], client=None, out=sys.stdout) -> int:
         creds.reset(cpe_key_of(args.claim_id))
         print('removed claim %s' % args.claim_id, file=out)
     elif args.command == 'claim-list':
-        print('%-16s %-8s %-14s %-20s %-10s %s' % (
-            'CLAIM', 'OUI', 'PRODUCT', 'SERIAL', 'CREDENTIAL', 'NETWORK/LABEL',
+        print('%-16s %-8s %-14s %-20s %-10s %-3s %s' % (
+            'CLAIM', 'OUI', 'PRODUCT', 'SERIAL', 'CREDENTIAL', 'CR',
+            'NETWORK/LABEL',
         ), file=out)
         for c in claims.list():
             cred = creds.get(c.cpe_key)
             state = 'per-cpe' if cred.rotated else 'bootstrap'
             if cred.pending_ha1:
                 state += '+pending'
-            print('%-16s %-8s %-14s %-20s %-10s %s' % (
+            print('%-16s %-8s %-14s %-20s %-10s %-3s %s' % (
                 c.claim_id, c.oui, c.product_class or '-', c.serial, state,
+                'yes' if cred.connection_request else 'no',
                 '/'.join(x for x in (c.network, c.label) if x) or '-',
             ), file=out)
     elif args.command == 'reset-credentials':
@@ -117,6 +126,19 @@ def run(argv: List[str], client=None, out=sys.stdout) -> int:
             return 1
         creds.reset(cpe_key_of(args.claim_id))
         print('%s may bootstrap again' % args.claim_id, file=out)
+    elif args.command == 'rotate-credentials':
+        if claims.get(args.claim_id) is None:
+            print('error: no claim %s' % args.claim_id, file=out)
+            return 1
+        cred = creds.get(cpe_key_of(args.claim_id))
+        if not cred.rotated:
+            print(
+                '%s is still on the bootstrap credential; it rotates at its '
+                'next session anyway' % args.claim_id, file=out,
+            )
+            return 0
+        creds.drop_connection_request(cred.cpe_key)
+        print('%s rotates its credentials at its next session' % args.claim_id, file=out)
     return 0
 
 
