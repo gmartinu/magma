@@ -169,6 +169,11 @@ func TestCreateTaskErrors(t *testing.T) {
 	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
+	acsd.err = status.Error(codes.FailedPrecondition, "frozen")
+	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "acs entitlement")
+
 	acsd.dialErr = errors.New("no SyncRPC stream for hw2")
 	rec = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
