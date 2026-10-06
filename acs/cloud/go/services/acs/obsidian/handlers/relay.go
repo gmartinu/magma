@@ -35,11 +35,14 @@ const (
 	TasksPath      = CpePath + obsidian.UrlSep + "tasks"
 	TaskPath       = TasksPath + obsidian.UrlSep + ":task_id"
 	ParametersPath = CpePath + obsidian.UrlSep + "parameters"
+	// ConnectionRequestPath asks acsd to wake the CPE up now.
+	ConnectionRequestPath = CpePath + obsidian.UrlSep + "connection_request"
 
 	relayTimeout = 20 * time.Second
 
 	taskTypePrefix   = "CPE_TASK_TYPE_"
 	taskStatusPrefix = "CPE_TASK_STATUS_"
+	reachPrefix      = "CPE_REACH_"
 )
 
 // CpeManagers reaches acsd's CpeManager on a gateway. The returned close
@@ -70,6 +73,7 @@ func (h *Handlers) relayHandlers() []obsidian.Handler {
 		{Path: TasksPath, Methods: obsidian.GET, HandlerFunc: h.listTasks},
 		{Path: TasksPath, Methods: obsidian.POST, HandlerFunc: h.createTask},
 		{Path: TaskPath, Methods: obsidian.GET, HandlerFunc: h.getTask},
+		{Path: ConnectionRequestPath, Methods: obsidian.POST, HandlerFunc: h.connectionRequest},
 	}
 }
 
@@ -183,6 +187,31 @@ func (h *Handlers) getTask(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, toTask(task))
 	})
+}
+
+func (h *Handlers) connectionRequest(c echo.Context) error {
+	return h.relay(c, func(ctx context.Context, client lte_protos.CpeManagerClient, cpeKey string) error {
+		res, err := client.ConnectionRequest(ctx, &lte_protos.ConnectionRequestRequest{CpeKey: cpeKey})
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, &models.AcsConnectionRequest{
+			Sent:       res.Sent,
+			Reach:      reachName(res.Reach),
+			Reason:     res.Reason,
+			NextInform: unixTime(res.NextInform),
+			Detail:     res.Detail,
+		})
+	})
+}
+
+// reachName is acsd's reach as cpe_acs spells it: connection_request,
+// next_inform, or empty.
+func reachName(r lte_protos.CpeReach) string {
+	if r == lte_protos.CpeReach_CPE_REACH_UNSPECIFIED {
+		return ""
+	}
+	return strings.ToLower(strings.TrimPrefix(r.String(), reachPrefix))
 }
 
 func toEnqueueRequest(req *models.AcsTaskRequest) *lte_protos.EnqueueTaskRequest {
