@@ -12,7 +12,7 @@
  */
 
 // Thin typed client for the Orc8r ACS REST API (acs/cloud/go/services/acs,
-// swagger.v1.yml, feature/acs-orc8r ec975efac8). Kept by hand instead of regenerating nms/generated: the
+// swagger.v1.yml). Kept by hand instead of regenerating nms/generated: the
 // ACS swagger is not part of the combined spec the generator reads yet.
 import axios from 'axios';
 
@@ -64,7 +64,65 @@ export type AcsCpe = {
   pending_tasks?: number;
   last_session?: AcsCpeSession;
   hardware_id?: string;
+  // How queued tasks reach the CPE, as acsd reports it; empty from an acsd
+  // that does not say.
+  reach?: AcsReach | '';
+  reach_reason?: string;
+  next_inform?: string;
+  // Other gateways reporting this cpe_key online too.
+  conflicting_gateway_ids?: Array<string>;
 };
+
+export type AcsReach = 'connection_request' | 'next_inform';
+
+export type AcsConnectionRequest = {
+  sent: boolean;
+  reach?: AcsReach | '';
+  reason?: string;
+  next_inform?: string;
+  detail?: string;
+};
+
+export type AcsLogEvent = 'cpe_session_completed' | 'cpe_task_failed';
+
+// One record of the session log (GET /acs/{network_id}/logs).
+export type AcsLog = {
+  time: string;
+  event: AcsLogEvent;
+  cpe_key: string;
+  imsi?: string;
+  gateway_id?: string;
+  hardware_id?: string;
+  session_id?: string;
+  result?: string;
+  reason?: string;
+  started?: string;
+  ended?: string;
+  tasks_done?: number;
+  tasks_failed?: number;
+  faults?: number;
+  task_id?: string;
+  task_type?: string;
+  attempts?: number;
+  max_attempts?: number;
+  fault_code?: number;
+  fault_string?: string;
+};
+
+export type AcsLogs = {total_count: number; logs: Array<AcsLog>};
+
+export type AcsLogQuery = {
+  cpe_key?: string;
+  gateway_id?: string;
+  event?: AcsLogEvent;
+  start?: string;
+  end?: string;
+  size?: number;
+  from?: number;
+};
+
+// The logs route refuses a bigger page.
+export const ACS_LOGS_MAX_SIZE = 1000;
 
 // Vendor-independent model acsd normalizes the parameter tree into
 // (lte/gateway/python/magma/acsd/datamodel/model.py). Every section is
@@ -194,6 +252,24 @@ const AcsAPI = {
   ): Promise<AcsTask> {
     const res = await axios.get<AcsTask>(
       `${cpeUrl(networkId, cpeKey)}/tasks/${enc(taskId)}`,
+    );
+    return res.data;
+  },
+
+  async searchLogs(networkId: string, query: AcsLogQuery): Promise<AcsLogs> {
+    const res = await axios.get<AcsLogs>(
+      `${ACS_BASE_PATH}/${enc(networkId)}/logs`,
+      {params: query},
+    );
+    return res.data ?? {total_count: 0, logs: []};
+  },
+
+  async connectionRequest(
+    networkId: string,
+    cpeKey: string,
+  ): Promise<AcsConnectionRequest> {
+    const res = await axios.post<AcsConnectionRequest>(
+      `${cpeUrl(networkId, cpeKey)}/connection_request`,
     );
     return res.data;
   },
