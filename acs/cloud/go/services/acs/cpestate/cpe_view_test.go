@@ -32,7 +32,8 @@ const reported = `{"cpe_key": "IMSI001010000000001", "mode": "core", "imsi": "IM
 	"pending_tasks": 2, "last_session": {"cpe_key": "IMSI001010000000001", "session_id": "s1",
 	"result": "completed", "reason": "", "started": 1.0, "ended": 2.0, "tasks_done": 1,
 	"tasks_failed": 0, "faults": 0, "mode": "core"},
-	"model": {"identity": {"model_name": "Titan 4000"}, "cellular": {"rsrp": -95}}}`
+	"model": {"identity": {"model_name": "Titan 4000"}, "cellular": {"rsrp": -95}},
+	"reach": "next_inform", "reach_reason": "behind_nat", "next_inform": 1700000300.25}`
 
 func TestDeserializeAcsdView(t *testing.T) {
 	v, err := serde.Deserialize([]byte(reported), lte.CPEAcsStateType, cpestate.Serdes)
@@ -44,6 +45,9 @@ func TestDeserializeAcsdView(t *testing.T) {
 	assert.Equal(t, int32(2), view.PendingTasks)
 	assert.Equal(t, int32(1), view.LastSession.TasksDone)
 	assert.Equal(t, "Titan 4000", view.ModelName())
+	assert.Equal(t, cpestate.ReachNextInform, view.Reach)
+	assert.Equal(t, "behind_nat", view.ReachReason)
+	assert.Equal(t, 1700000300.25, view.NextInform)
 	assert.NoError(t, view.ValidateModel(context.Background()))
 }
 
