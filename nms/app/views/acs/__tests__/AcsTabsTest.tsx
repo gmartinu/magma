@@ -107,38 +107,35 @@ describe('AcsTasks', () => {
 });
 
 describe('AcsSessionLog', () => {
-  const events = [
+  const logs = [
     {
-      stream_name: 'acsd',
-      event_type: 'cpe_session_completed',
+      time: '2026-10-01T14:32:06Z',
+      event: 'cpe_session_completed' as const,
+      cpe_key: 'IMSI001010000000113',
       hardware_id: 'hw1',
-      tag: 'IMSI001010000000113',
-      timestamp: '2026-10-01T14:32:06Z',
-      value: {
-        session_id: 's-1',
-        result: 'completed',
-        started: 1790000000,
-        ended: 1790000001.5,
-        tasks_done: 1,
-        tasks_failed: 0,
-        faults: 0,
-      },
+      session_id: 's-1',
+      result: 'completed',
+      started: '2026-10-01T14:32:04Z',
+      ended: '2026-10-01T14:32:05.5Z',
+      tasks_done: 1,
+      tasks_failed: 0,
+      faults: 0,
     },
     {
-      stream_name: 'acsd',
-      event_type: 'cpe_session_completed',
-      hardware_id: 'hw1',
-      tag: 'CLAIMlab-5400-01',
-      timestamp: '2026-10-01T14:20:00Z',
-      value: {session_id: 's-2', result: 'timed_out', faults: 2},
+      time: '2026-10-01T14:20:00Z',
+      event: 'cpe_session_completed' as const,
+      cpe_key: 'CLAIMlab-5400-01',
+      session_id: 's-2',
+      result: 'timed_out',
+      faults: 2,
     },
   ];
 
-  it('reads cpe_session_completed events of the network', async () => {
-    const get = jest
-      .spyOn(MagmaAPI.events, 'eventsNetworkIdGet')
-      .mockResolvedValue({data: events} as never);
-    const {getAllByTestId, getByText} = renderAt(
+  it('reads the session log through the ACS logs route', async () => {
+    const search = jest
+      .spyOn(AcsAPI, 'searchLogs')
+      .mockResolvedValue({total_count: 2, logs});
+    const {getAllByTestId, getByText, queryByTestId} = renderAt(
       '/nms/net1/acs/overview/sessions',
       '/nms/:networkId/acs/overview/sessions',
       <AcsSessionLog networkId="net1" />,
@@ -146,12 +143,12 @@ describe('AcsSessionLog', () => {
     await waitFor(() =>
       expect(getAllByTestId('acs-session-row')).toHaveLength(2),
     );
-    expect(get).toHaveBeenCalledWith(
+    expect(search).toHaveBeenCalledWith(
+      'net1',
       expect.objectContaining({
-        networkId: 'net1',
-        streams: 'acsd',
-        events: 'cpe_session_completed',
-        tags: undefined,
+        event: 'cpe_session_completed',
+        cpe_key: undefined,
+        size: 100,
       }),
     );
     const [ok, timedOut] = getAllByTestId('acs-session-row');
@@ -159,21 +156,48 @@ describe('AcsSessionLog', () => {
     expect(ok).toHaveTextContent('1 done · 0 failed');
     expect(ok).toHaveTextContent('1.5 s');
     expect(timedOut).toHaveTextContent('Timed out');
+    expect(getByText('Sessions (2)')).toBeInTheDocument();
+    expect(queryByTestId('acs-sessions-more')).toBeNull();
     fireEvent.click(within(ok).getByLabelText('expand'));
     expect(getByText(/Session s-1/)).toBeInTheDocument();
   });
 
-  it('filters the device log by its cpe_key tag', async () => {
-    const get = jest
-      .spyOn(MagmaAPI.events, 'eventsNetworkIdGet')
-      .mockResolvedValue({data: []} as never);
+  it('says how many sessions it did not load and loads more', async () => {
+    const search = jest
+      .spyOn(AcsAPI, 'searchLogs')
+      .mockResolvedValue({total_count: 250, logs});
+    const {findByText, getByText, getByTestId} = renderAt(
+      '/x',
+      '/x',
+      <AcsSessionLog networkId="net1" />,
+    );
+    expect(await findByText('Sessions (2 of 250)')).toBeInTheDocument();
+    expect(getByTestId('acs-sessions-more')).toHaveTextContent(
+      'Showing the newest 2 of 250 sessions.',
+    );
+    fireEvent.click(getByText('Load more'));
+    await waitFor(() =>
+      expect(search).toHaveBeenLastCalledWith(
+        'net1',
+        expect.objectContaining({size: 200}),
+      ),
+    );
+  });
+
+  it('filters the device log by its cpe_key', async () => {
+    const search = jest
+      .spyOn(AcsAPI, 'searchLogs')
+      .mockResolvedValue({total_count: 0, logs: []});
     const {findByText} = renderAt(
       '/x',
       '/x',
       <AcsSessionLog networkId="net1" cpeKey="IMSI1" />,
     );
     expect(await findByText('No sessions in this range')).toBeInTheDocument();
-    expect(get).toHaveBeenCalledWith(expect.objectContaining({tags: 'IMSI1'}));
+    expect(search).toHaveBeenCalledWith(
+      'net1',
+      expect.objectContaining({cpe_key: 'IMSI1'}),
+    );
   });
 });
 
@@ -236,8 +260,8 @@ describe('AcsDashboard', () => {
     mockAcsAPI();
     mockPrometheus();
     jest
-      .spyOn(MagmaAPI.events, 'eventsNetworkIdGet')
-      .mockResolvedValue({data: []} as never);
+      .spyOn(AcsAPI, 'searchLogs')
+      .mockResolvedValue({total_count: 0, logs: []});
     const list = renderAt(
       '/nms/net1/acs',
       '/nms/:networkId/acs/*',
