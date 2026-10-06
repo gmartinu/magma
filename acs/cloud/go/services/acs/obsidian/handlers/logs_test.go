@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -102,6 +103,13 @@ func TestSearchLogsRefusesBadParameters(t *testing.T) {
 func TestSearchLogsWithoutElasticsearch(t *testing.T) {
 	code, _ := searchLogs(t, newHandlers(nil), "")
 	assert.Equal(t, http.StatusServiceUnavailable, code)
+}
+
+func TestSearchLogsElasticsearchUnreachable(t *testing.T) {
+	err := fmt.Errorf("%w: lookup elasticsearch: no such host", sessionlog.ErrUnavailable)
+	code, body := searchLogs(t, newHandlers(nil).WithLogs(&fakeLogs{err: err}), "")
+	assert.Equal(t, http.StatusServiceUnavailable, code)
+	assert.Contains(t, string(body), "Elasticsearch cannot be reached")
 }
 
 func TestSearchLogsSearchError(t *testing.T) {
