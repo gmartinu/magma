@@ -49,6 +49,18 @@ cwmp_wan:
   cert_path: /var/opt/magma/certs/acsd_wan.crt
   key_path: /var/opt/magma/certs/acsd_wan.key
 
+# How queued tasks reach claimed CPEs. A carrier NAT usually blocks
+# Connection Requests, so tasks wait for the CPE's next periodic Inform:
+# periodic_inform_interval (seconds) is set on claimed CPEs at BOOTSTRAP
+# (the AcsD mconfig value wins when set; 0 leaves the CPE's own).
+# connection_request: auto sends one only when the ConnectionRequestURL host
+# is the address the CPE connects from, or public; always to any URL (e.g.
+# CPEs reached over a VPN); off never.
+cwmp_reach:
+  periodic_inform_interval: 300
+  connection_request: auto
+  connection_request_timeout_secs: 5
+
 # Per-CPE radio KPIs (acs_rsrp_dbm, acs_rsrq_db, acs_sinr_db), labelled by
 # cpe_key, for the online CPEs. Each CPE adds three series that metricsd
 # pushes to Orc8r, so past max_cpes the rest are left out
