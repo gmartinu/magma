@@ -99,8 +99,15 @@ class CwmpSessionHandler:
     IP, so a later message from the same IP belongs to the same CPE. On the
     claimed listener it is keyed by TCP connection (session_key_of). Keeping it next to the task
     claims means a session that times out, or dies with acsd, requeues its
-    task. Thread-safe, so the listener's worker threads can share one
-    instance.
+    task.
+
+    Thread-safe, and called concurrently by the listeners' worker threads
+    (server.CwmpWsgiApp runs it outside the spyne lock): it keeps no
+    per-request state of its own; sessions are records in the store under
+    their own key, compound store updates (task claims, session ends) run
+    under the store's lock, ClaimedMode guards its rotation state with its
+    own lock, and the identity path (mobilityd gRPC stub, SerialBinder)
+    is thread-safe.
     """
 
     def __init__(

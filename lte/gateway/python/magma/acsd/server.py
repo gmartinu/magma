@@ -16,6 +16,7 @@ import logging
 import ssl
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from typing import Callable, Iterable, List, Optional
 from wsgiref.simple_server import WSGIServer
 
@@ -54,14 +55,37 @@ class CwmpWsgiApp:
     Wraps the spyne CWMP application so it can be served from many threads.
 
     spyne's TR-069 dispatch writes the reply name onto the shared method
-    descriptor (`sub_name`), so two requests in flight at once could swap
-    replies. The request body is read before taking the lock, so a slow CPE
-    upload never blocks the others; only the in-memory SOAP work is serial.
+    descriptor (`sub_name`) after the handler returns, and serialization
+    reads it back, so two requests in flight at once could swap replies.
+    spyne's parse, the sub_name write and serialization therefore run under
+    one lock. The session handler, where the time goes (the mobilityd RPC
+    of the identity, Redis), runs with the lock released (unlocked()): it
+    is called before its request writes sub_name, and the lock is taken
+    back before spyne does. The request body is read before the lock too,
+    so a slow CPE upload never blocks the others.
     """
 
     def __init__(self, spyne_app: WsgiApp):
         self._spyne_app = spyne_app
         self._lock = threading.Lock()
+        self._held = threading.local()
+
+    @contextmanager
+    def unlocked(self):
+        """
+        Release the spyne lock for the block if this thread holds it, so
+        other CPEs' requests go through spyne meanwhile.
+        """
+        if not getattr(self._held, 'value', False):
+            yield
+            return
+        self._held.value = False
+        self._lock.release()
+        try:
+            yield
+        finally:
+            self._lock.acquire()
+            self._held.value = True
 
     def __call__(self, environ: dict, start_response: Callable) -> List[bytes]:
         if environ.get('REQUEST_METHOD', '').upper() != 'POST':
@@ -82,7 +106,11 @@ class CwmpWsgiApp:
             reply['status'], reply['headers'] = status, headers
 
         with self._lock:
-            chunks = b''.join(self._spyne_app(environ, capture))
+            self._held.value = True
+            try:
+                chunks = b''.join(self._spyne_app(environ, capture))
+            finally:
+                self._held.value = False
 
         status, headers = reply['status'], reply['headers']
         if status.startswith('200') and not chunks:
@@ -94,6 +122,17 @@ class CwmpWsgiApp:
         ] + [('Content-Length', str(len(chunks)))]
         start_response(status, headers)
         return [chunks]
+
+
+class _UnlockedHandler:
+    """The session handler, called with the spyne lock released."""
+
+    def __init__(self, handler: Tr069MessageHandler, cwmp: CwmpWsgiApp):
+        self._handler, self._cwmp = handler, cwmp
+
+    def handle_tr069_message(self, ctx, message):
+        with self._cwmp.unlocked():
+            return self._handler.handle_tr069_message(ctx, message)
 
 
 def _echo_cwmp_id(ctx) -> None:
@@ -111,9 +150,9 @@ def make_cwmp_wsgi(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     """
     The CWMP WSGI app with `handler` owning every CPE message. The spyne
     service and its handler are process-wide (class attributes), so every
-    listener must share this one app and its lock.
+    listener must share this one app and its lock. `handler` is called
+    from many threads at once, so it must be thread-safe.
     """
-    AutoConfigServer.set_state_machine_manager(handler)
     app = Tr069Application(
         [AutoConfigServer], CWMP_NS,
         in_protocol=Tr069Soap11(validator='soft'),
@@ -121,7 +160,9 @@ def make_cwmp_wsgi(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     )
     # App-level listener: fires after the RPC body, before serialization.
     app.event_manager.add_listener('method_return_object', _echo_cwmp_id)
-    return CwmpWsgiApp(WsgiApplication(app))
+    cwmp = CwmpWsgiApp(WsgiApplication(app))
+    AutoConfigServer.set_state_machine_manager(_UnlockedHandler(handler, cwmp))
+    return cwmp
 
 
 def make_cwmp_app(
