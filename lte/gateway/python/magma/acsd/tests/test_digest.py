@@ -15,12 +15,14 @@ import hashlib
 import http.client
 import logging
 import os
+import socket
 import threading
 import unittest
 
 import fakeredis
 from magma.acsd.config import CwmpBind
 from magma.acsd.digest import (
+    DRAIN_LIMIT_BYTES,
     DigestAuthenticator,
     Ha1,
     NonceStore,
@@ -354,6 +356,27 @@ class ListenerDigestTest(_Listener):
         self._challenged_inform()
         self.assertEqual(self.identify_calls, 0)
         self.assertIsNone(self.handler.session_identity('127.0.0.1'))
+
+
+class ListenerLargeUnauthenticatedBodyTest(_Listener):
+    def test_large_body_is_not_read_and_the_connection_closes(self):
+        sock = socket.create_connection(('127.0.0.1', self.server.server_address[1]), timeout=5)
+        try:
+            # Headers only: draining the declared body would hang the test.
+            sock.sendall((
+                'POST / HTTP/1.1\r\nHost: x\r\nContent-Type: text/xml\r\n'
+                'Content-Length: %d\r\n\r\n' % (DRAIN_LIMIT_BYTES + 1)
+            ).encode())
+            data = b''
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            sock.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 401'), data)
+        self.assertEqual(self.identify_calls, 0)
 
 
 class ListenerDigestUnknownIpTest(_Listener):

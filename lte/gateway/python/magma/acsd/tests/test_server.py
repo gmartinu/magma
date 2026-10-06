@@ -175,6 +175,65 @@ class ConcurrencyTest(CwmpListenerTest):
         self.assertEqual(errors, [])
 
 
+class BodyLimitTest(unittest.TestCase):
+    LIMIT = 4096
+
+    def setUp(self):
+        self.server = make_cwmp_server(
+            CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(store=memory_store()),
+            workers=2, max_body=self.LIMIT,
+        )
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _raw(self, content_length):
+        sock = socket.create_connection(('127.0.0.1', self.server.server_address[1]), timeout=5)
+        # Headers only: a server that tried to read the body would hang.
+        sock.sendall((
+            'POST / HTTP/1.1\r\nHost: x\r\nContent-Type: text/xml\r\n'
+            'Content-Length: %s\r\n\r\n' % content_length
+        ).encode())
+        return sock
+
+    @staticmethod
+    def _read_until_closed(sock):
+        data = b''
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return data
+            data += chunk
+
+    def test_oversized_body_is_413_and_the_connection_closes(self):
+        sock = self._raw(10 * 1024 * 1024)
+        try:
+            data = self._read_until_closed(sock)
+        finally:
+            sock.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 413'), data)
+
+    def test_bad_content_length_is_400(self):
+        sock = self._raw('lots')
+        try:
+            data = self._read_until_closed(sock)
+        finally:
+            sock.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 400'), data)
+
+    def test_body_within_the_limit_is_served(self):
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_address[1], timeout=5)
+        try:
+            conn.request('POST', '/', _fixture('sim4000_inform.xml'), XML)
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 200)
+        finally:
+            conn.close()
+
+
 class RefusedSessionTest(CwmpListenerTest):
     @staticmethod
     def identify(source_ip, inform):

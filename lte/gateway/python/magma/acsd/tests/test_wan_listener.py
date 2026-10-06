@@ -293,6 +293,15 @@ class MainWanWiringTest(unittest.TestCase):
         self.assertIs(cwmp, listen.call_args.kwargs['cwmp'])
         self.assertEqual(claimed.lookup('b', '192.0.2.1'), 'bp')
 
+    def test_body_limit_reaches_both_listeners(self):
+        listen, wan_listen = self._run_main({
+            'cwmp_auth': {'username': 'b', 'password': 'bp'},
+            'cwmp_wan': {'enabled': True},
+            'cwmp_max_body_bytes': 2048,
+        })
+        self.assertEqual(listen.call_args.kwargs['max_body'], 2048)
+        self.assertEqual(wan_listen.call_args.kwargs['max_body'], 2048)
+
 
 if __name__ == '__main__':
     unittest.main()
