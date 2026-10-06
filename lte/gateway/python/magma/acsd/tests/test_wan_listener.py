@@ -262,6 +262,20 @@ class WanListenerTest(unittest.TestCase):
         listen.assert_not_called()
 
 
+class ClaimedModeForgetTest(unittest.TestCase):
+    def test_removing_a_claim_forgets_through_the_live_store(self):
+        redis = fakeredis.FakeStrictRedis()
+        store = AcsStore(redis)
+        mode = main.make_claimed_mode(CwmpWanConfig(enabled=True), store, redis)
+        mode.claims.add('00A1B2', 'P', 'SN1', claim_id='t1')
+        store.create_task('CLAIMt1', 'reboot')
+        cred, _ = mode.credentials.begin_rotation('CLAIMt1', 16)
+        mode.credentials.promote('CLAIMt1', cred.pending_generation)
+        mode.claims.remove('t1')
+        self.assertEqual(store.list_tasks('CLAIMt1'), [])
+        self.assertFalse(mode.credentials.get('CLAIMt1').rotated)
+
+
 class MainWanWiringTest(unittest.TestCase):
     def _run_main(self, config):
         service = mock.Mock(mconfig=mconfigs_pb2.AcsD())

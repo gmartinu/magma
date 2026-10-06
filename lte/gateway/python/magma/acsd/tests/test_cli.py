@@ -23,6 +23,7 @@ import fakeredis
 from magma.acsd import cli
 from magma.acsd.claims import ClaimRegistry
 from magma.acsd.credentials import CredentialStore
+from magma.acsd.store import AcsStore
 
 
 class CliTest(unittest.TestCase):
@@ -55,8 +56,10 @@ class CliTest(unittest.TestCase):
         _, out = self.run_cli('claim-list')
         self.assertEqual(out.splitlines()[1].split()[4:6], ['per-cpe', 'yes'])
 
+        AcsStore(self.redis).create_task('CLAIMtitan-1', 'reboot')
         self.assertEqual(self.run_cli('claim-remove', 'titan-1')[0], 0)
         self.assertIsNone(creds.owner('CLAIMtitan-1.1'))
+        self.assertEqual(AcsStore(self.redis).list_tasks('CLAIMtitan-1'), [])
         self.assertEqual(self.run_cli('claim-remove', 'titan-1')[0], 1)
 
     def test_duplicate_claim_is_an_error(self):
