@@ -49,6 +49,7 @@ import {
   modelValue,
   nextInform,
   taskLabel,
+  taskRunsAt,
 } from './AcsUtils';
 import {
   Navigate,
@@ -106,7 +107,7 @@ function DetailHeader({
 }) {
   const {cpe, model, tasks} = data;
   const interval = intervalOf(model);
-  const next = nextInform(cpe.last_inform, interval);
+  const next = nextInform(cpe, interval);
   const pendingTypes = new Set(
     tasks.filter(t => t.status === 'pending').map(t => t.type as string),
   );
@@ -176,7 +177,15 @@ function DetailHeader({
   );
 }
 
-export function PendingBanner({tasks}: {tasks: Array<AcsTask>}) {
+export function PendingBanner({
+  tasks,
+  cpe,
+  intervalSec,
+}: {
+  tasks: Array<AcsTask>;
+  cpe: AcsCpe;
+  intervalSec: number;
+}) {
   const pending = tasks.filter(t => t.status === 'pending');
   if (pending.length === 0) {
     return null;
@@ -187,10 +196,11 @@ export function PendingBanner({tasks}: {tasks: Array<AcsTask>}) {
   return (
     <Alert severity="warning" sx={{mb: 2}} data-testid="acs-pending-banner">
       <b>
-        {pending.length} task{pending.length > 1 ? 's' : ''} waiting for the
-        next Inform:
+        {pending.length} task{pending.length > 1 ? 's' : ''} pending:
       </b>{' '}
-      {what}. The page updates when it runs.
+      {what}.{' '}
+      <span data-testid="acs-pending-when">{taskRunsAt(cpe, intervalSec)}</span>
+      . The page updates when it runs.
     </Alert>
   );
 }
@@ -364,7 +374,11 @@ export default function AcsCpeDetail() {
             You can leave this page.
           </Alert>
         )}
-        <PendingBanner tasks={data.tasks} />
+        <PendingBanner
+          tasks={data.tasks}
+          cpe={data.cpe}
+          intervalSec={intervalOf(data.model)}
+        />
         <DetailHeader
           networkId={networkId}
           data={data}
@@ -382,7 +396,15 @@ export default function AcsCpeDetail() {
             path="/parameters"
             element={<AcsParameters networkId={networkId} cpeKey={cpeKey} />}
           />
-          <Route path="/tasks" element={<AcsTasks tasks={data.tasks} />} />
+          <Route
+            path="/tasks"
+            element={
+              <AcsTasks
+                tasks={data.tasks}
+                runsAt={taskRunsAt(data.cpe, intervalOf(data.model))}
+              />
+            }
+          />
           <Route
             path="/sessions"
             element={<AcsSessionLog networkId={networkId} cpeKey={cpeKey} />}
