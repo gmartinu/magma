@@ -222,7 +222,9 @@ py_library(
     deps = [
         ":acsd_lib",
         ":reach",
+        requirement("netifaces"),
         requirement("requests"),
+        requirement("urllib3"),
     ],
 )
 
