@@ -98,6 +98,9 @@ describe('AcsTasks', () => {
       'Sessions kept dropping; no retries left',
     );
     expect(taskResult(FIXTURE_TASKS[0])).toMatch(/No Inform before the TTL/);
+    const pending = {...FIXTURE_TASKS[0], status: 'pending' as const};
+    expect(taskResult(pending)).toBe('Waiting for next Inform');
+    expect(taskResult(pending, 'Runs now')).toBe('Runs now');
   });
 
   it('has an empty state', () => {

@@ -29,6 +29,7 @@ import {
   modelValue,
   nextInform,
   signalBars,
+  taskRunsAt,
   toDate,
 } from '../AcsUtils';
 import {
@@ -90,11 +91,46 @@ describe('AcsUtils', () => {
 
   it('computes the next Inform and how late it is', () => {
     const now = new Date('2026-10-01T14:40:00Z');
-    const onTime = nextInform('2026-10-01T14:38:00Z', 300, now);
+    const onTime = nextInform({last_inform: '2026-10-01T14:38:00Z'}, 300, now);
     expect(onTime.due?.toISOString()).toBe('2026-10-01T14:43:00.000Z');
     expect(onTime.overdueSec).toBe(0);
-    expect(nextInform('2026-10-01T14:00:00Z', 300, now).overdueSec).toBe(2100);
-    expect(nextInform(undefined, 300, now).due).toBeNull();
+    expect(
+      nextInform({last_inform: '2026-10-01T14:00:00Z'}, 300, now).overdueSec,
+    ).toBe(2100);
+    expect(nextInform({}, 300, now).due).toBeNull();
+    // acsd's next_inform wins over the interval the page assumes.
+    expect(
+      nextInform(
+        {
+          last_inform: '2026-10-01T14:38:00Z',
+          next_inform: '2026-10-01T14:39:00Z',
+        },
+        300,
+        now,
+      ).overdueSec,
+    ).toBe(60);
+  });
+
+  it('says when a queued task runs', () => {
+    const now = new Date('2026-10-01T14:40:00Z');
+    expect(taskRunsAt({reach: 'connection_request'}, 300, now)).toBe(
+      'Runs now',
+    );
+    expect(
+      taskRunsAt(
+        {
+          reach: 'next_inform',
+          reach_reason: 'behind_nat',
+          next_inform: '2026-10-01T14:41:30Z',
+        },
+        300,
+        now,
+      ),
+    ).toBe('At next check-in (~90 s): the CPE is behind NAT');
+    expect(taskRunsAt({next_inform: '2026-10-01T14:30:00Z'}, 300, now)).toBe(
+      'At next check-in (overdue)',
+    );
+    expect(taskRunsAt({}, 300, now)).toBe('At next check-in');
   });
 
   it('formats durations and uptimes', () => {
@@ -243,11 +279,12 @@ describe('AcsAPI', () => {
         size: 100,
       }),
     ).toEqual(page);
-    expect(
-      get,
-    ).toHaveBeenCalledWith('/nms/apicontroller/magma/v1/acs/net1/logs', {
-      params: {event: 'cpe_session_completed', cpe_key: 'IMSI1', size: 100},
-    });
+    expect(get).toHaveBeenCalledWith(
+      '/nms/apicontroller/magma/v1/acs/net1/logs',
+      {
+        params: {event: 'cpe_session_completed', cpe_key: 'IMSI1', size: 100},
+      },
+    );
     expect(await AcsAPI.connectionRequest('net1', 'CLAIM 1')).toEqual({
       sent: true,
     });
