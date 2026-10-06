@@ -99,7 +99,7 @@ func setupRelay(t *testing.T) (*Handlers, *fakeAcsd) {
 	setupNetwork(t)
 	reportCpe(t, "hw2", titan(cpeKey, cpestate.ModeCore, true))
 	acsd := &fakeAcsd{}
-	return NewHandlers(acsd), acsd
+	return newHandlers(acsd), acsd
 }
 
 func TestCreateTaskRelaysToReportingGateway(t *testing.T) {
@@ -122,6 +122,19 @@ func TestCreateTaskRelaysToReportingGateway(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"max_attempts": 3.0}, task.Args)
 	assert.Equal(t, time.UnixMilli(1700000001500).UTC(), time.Time(task.Updated))
 	assert.Nil(t, task.Deadline)
+}
+
+func TestRelayGoesToTheServingGateway(t *testing.T) {
+	h, acsd := setupRelay(t)
+	acsd.task = rebootTask()
+	// hw1 still reports the CPE it served before, with an older Inform.
+	old := titan(cpeKey, cpestate.ModeCore, false)
+	old.LastInform -= 3600
+	reportCpe(t, "hw1", old)
+
+	rec := serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"hw2"}, acsd.dialedHwIDs)
 }
 
 func TestCreateTaskSetParameterValues(t *testing.T) {
