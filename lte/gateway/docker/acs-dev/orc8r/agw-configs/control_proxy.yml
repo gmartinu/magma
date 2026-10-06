@@ -1,0 +1,6 @@
+---
+# Dev override: the Orc8r proxy is reached on the acs-dev network under its
+# alias controller.magma.test, on the container ports.
+nghttpx_config_location: /var/opt/magma/tmp/nghttpx.conf
+cloud_port: 8443
+bootstrap_port: 8444
