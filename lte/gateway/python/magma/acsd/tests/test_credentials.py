@@ -89,6 +89,51 @@ class CredentialStoreTest(unittest.TestCase):
         cred, _ = self.creds.begin_rotation(KEY, 16)
         self.assertEqual(cred.pending_username, KEY + '.1')
 
+    def test_connection_request_credential_follows_the_rotation(self):
+        cred, password = self.creds.begin_rotation(KEY, 16)
+        self.assertEqual(len(cred.pending_cr_password), 16)
+        self.assertNotEqual(cred.pending_cr_password, password)
+        self.assertIsNone(self.creds.get(KEY).connection_request)
+        self.creds.promote(KEY, 1)
+        cred = self.creds.get(KEY)
+        self.assertEqual(cred.connection_request, (KEY + '.1', cred.cr_password))
+        self.assertEqual(cred.pending_cr_password, '')
+
+        # A failed next rotation keeps the one in use.
+        self.creds.begin_rotation(KEY, 16)
+        self.creds.abort_rotation(KEY, 2)
+        after = self.creds.get(KEY)
+        self.assertEqual(after.connection_request, cred.connection_request)
+        self.assertEqual(after.pending_cr_password, '')
+
+    def test_drop_connection_request(self):
+        self.assertFalse(self.creds.drop_connection_request(KEY))
+        self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, 1)
+        self.assertTrue(self.creds.drop_connection_request(KEY))
+        cred = self.creds.get(KEY)
+        self.assertIsNone(cred.connection_request)
+        # The ACS credential stays.
+        self.assertTrue(cred.rotated)
+        self.assertEqual(self.creds.owner(KEY + '.1').which, ACTIVE)
+
+    def test_reset_forgets_the_connection_request_credential(self):
+        self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, 1)
+        self.creds.reset(KEY)
+        self.assertIsNone(self.creds.get(KEY).connection_request)
+
+    def test_records_without_connection_request_fields_load(self):
+        # Written by an acsd from before Connection Request credentials.
+        self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, 1)
+        raw = dict(self.creds._creds[KEY])
+        del raw['cr_password'], raw['pending_cr_password']
+        self.creds._creds[KEY] = raw
+        cred = self.creds.get(KEY)
+        self.assertTrue(cred.rotated)
+        self.assertIsNone(cred.connection_request)
+
     def test_password_never_reaches_redis(self):
         _, password = self.creds.begin_rotation(KEY, 24)
         self.creds.promote(KEY, 1)

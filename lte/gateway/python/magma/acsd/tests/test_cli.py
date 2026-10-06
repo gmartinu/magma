@@ -53,7 +53,7 @@ class CliTest(unittest.TestCase):
         creds.begin_rotation('CLAIMtitan-1', 16)
         creds.promote('CLAIMtitan-1', 1)
         _, out = self.run_cli('claim-list')
-        self.assertIn('per-cpe', out)
+        self.assertEqual(out.splitlines()[1].split()[4:6], ['per-cpe', 'yes'])
 
         self.assertEqual(self.run_cli('claim-remove', 'titan-1')[0], 0)
         self.assertIsNone(creds.owner('CLAIMtitan-1.1'))
@@ -73,6 +73,25 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.run_cli('reset-credentials', 'a')[0], 0)
         self.assertFalse(creds.get('CLAIMa').rotated)
         self.assertEqual(self.run_cli('reset-credentials', 'missing')[0], 1)
+
+    def test_rotate_credentials(self):
+        self.run_cli('claim-add', '--oui', '00A1B2', '--serial', 'SN1', '--id', 'a')
+        rc, out = self.run_cli('rotate-credentials', 'a')
+        self.assertEqual(rc, 0)
+        self.assertIn('bootstrap', out)
+        creds = CredentialStore(self.redis, 'magma-acs')
+        creds.begin_rotation('CLAIMa', 16)
+        creds.promote('CLAIMa', 1)
+        rc, out = self.run_cli('rotate-credentials', 'a')
+        self.assertEqual(rc, 0)
+        cred = creds.get('CLAIMa')
+        # Still managed: only the Connection Request credential is gone,
+        # which makes the next session rotate both.
+        self.assertTrue(cred.rotated)
+        self.assertIsNone(cred.connection_request)
+        _, out = self.run_cli('claim-list')
+        self.assertEqual(out.splitlines()[1].split()[5], 'no')
+        self.assertEqual(self.run_cli('rotate-credentials', 'missing')[0], 1)
 
 
 @unittest.skipUnless(shutil.which('openssl'), 'needs openssl')
