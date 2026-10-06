@@ -21,6 +21,9 @@ cwmp_address: 10.1.0.1
 cwmp_port: 48081
 # CPE connections served at once; further CPEs wait in the accept queue.
 cwmp_workers: 16
+# Largest CWMP request body accepted on either listener (bytes); larger
+# ones get 413 and the connection is closed without reading them.
+cwmp_max_body_bytes: 1048576
 
 # HTTP Digest authentication of CPEs, checked on top of the CPE identity
 # (source IP -> IMSI). mode: required (default) or off. CPEs must be set with
