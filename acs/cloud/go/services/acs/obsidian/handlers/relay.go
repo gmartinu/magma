@@ -73,20 +73,20 @@ func (h *Handlers) relayHandlers() []obsidian.Handler {
 	}
 }
 
-// relay finds the gateway that reports the CPE and calls its acsd.
+// relay calls acsd on the gateway serving the CPE.
 func (h *Handlers) relay(c echo.Context, call func(context.Context, lte_protos.CpeManagerClient, string) error) error {
 	networkID, nerr := obsidian.GetNetworkId(c)
 	if nerr != nil {
 		return nerr
 	}
 	cpeKey := c.Param("cpe_key")
-	_, st, err := loadCpe(c.Request().Context(), networkID, cpeKey)
+	owner, _, err := h.loadCpe(networkID, cpeKey)
 	if err != nil {
 		return err
 	}
-	client, gwCtx, closeConn, err := h.cpes.Dial(st.ReporterID)
+	client, gwCtx, closeConn, err := h.cpes.Dial(owner.HardwareID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "gateway "+st.ReporterID+" unreachable: "+err.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "gateway "+owner.HardwareID+" unreachable: "+err.Error())
 	}
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(gwCtx, relayTimeout)
