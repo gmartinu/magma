@@ -25,6 +25,7 @@ from magma.acsd import main, tasks
 from magma.acsd.config import MODE_CLAIMED
 from magma.acsd.cpe_state import CpeViews
 from magma.acsd.events import (
+    CPE_BOOTSTRAP_REFUSED,
     CPE_SESSION_COMPLETED,
     CPE_TASK_FAILED,
     STREAM_NAME,
@@ -67,6 +68,7 @@ class AcsEventsTest(unittest.TestCase):
         self.clock = Clock()
         self.emitter = FakeEmitter()
         events = AcsEvents(self.emitter)
+        self.acs_events = events
         self.store = AcsStore(
             fakeredis.FakeStrictRedis(), clock=self.clock, listener=events,
         )
@@ -106,6 +108,12 @@ class AcsEventsTest(unittest.TestCase):
             'fault_code': 9002, 'fault_string': 'busy',
         })
 
+    def test_bootstrap_refused(self):
+        self.acs_events.bootstrap_refused(CLAIMED, 'SN1', '198.51.100.7')
+        self.assertEqual(self.emitter.events, [(CPE_BOOTSTRAP_REFUSED, CLAIMED, {
+            'cpe_key': CLAIMED, 'serial': 'SN1', 'source_ip': '198.51.100.7',
+        })])
+
     @unittest.skipUnless(MAGMA_ROOT, 'needs MAGMA_ROOT to read the swagger specs')
     def test_events_match_their_swagger_schemas(self):
         with open(os.path.join(MAGMA_ROOT, 'lte/swagger/cpe_acs_events.v1.yml')) as f:
@@ -116,7 +124,8 @@ class AcsEventsTest(unittest.TestCase):
         self.store.end_session('10.1.0.5', 'CPE started a new session')
         task = tasks.enqueue_task(self.store, CPE, tasks.REBOOT, max_attempts=1)
         self.store.fail_task(task.task_id, 9001, 'denied', retryable=False)
-        self.assertEqual(len(self.emitter.events), 2)
+        self.acs_events.bootstrap_refused(CLAIMED, 'SN1', '198.51.100.7')
+        self.assertEqual(len(self.emitter.events), 3)
         for event_type, _, value in self.emitter.events:
             self.assertEqual(
                 registry[event_type], {'module': 'lte', 'filename': 'cpe_acs_events.v1.yml'},

@@ -77,6 +77,20 @@ class CliTest(unittest.TestCase):
         self.assertFalse(creds.get('CLAIMa').rotated)
         self.assertEqual(self.run_cli('reset-credentials', 'missing')[0], 1)
 
+    def test_allow_rebootstrap(self):
+        self.run_cli('claim-add', '--oui', '00a1b2', '--serial', 'SN1', '--id', 't1')
+        rc, out = self.run_cli('allow-rebootstrap', 't1')
+        self.assertEqual(rc, 0)
+        self.assertIn('needs no approval', out)
+        creds = CredentialStore(self.redis, 'magma-acs')
+        cred, _ = creds.begin_rotation('CLAIMt1', 16)
+        creds.promote('CLAIMt1', cred.pending_generation)
+        rc, out = self.run_cli('allow-rebootstrap', 't1', '--ttl-mins', '5')
+        self.assertEqual(rc, 0)
+        self.assertIn('may bootstrap once until', out)
+        self.assertGreater(creds.rebootstrap_approval('CLAIMt1'), 0)
+        self.assertEqual(self.run_cli('allow-rebootstrap', 'nope')[0], 1)
+
     def test_rotate_credentials(self):
         self.run_cli('claim-add', '--oui', '00A1B2', '--serial', 'SN1', '--id', 'a')
         rc, out = self.run_cli('rotate-credentials', 'a')
