@@ -228,6 +228,27 @@ class WanListenerTest(unittest.TestCase):
         self.assertIn(b'InformResponse', body)
         conn.close()
 
+    def test_session_cookie_survives_a_reconnect(self):
+        cpe = DigestCpe(BOOT_USER, BOOT_PASSWORD)
+        conn, resp, _ = self._open_session(cpe)
+        self.assertEqual(resp.status, 200)
+        cookie = resp.getheader('Set-Cookie').split(';')[0]
+        self.assertIn('Secure', resp.getheader('Set-Cookie'))
+        conn.close()
+        conn = self._https()
+        headers = dict(XML, Cookie=cookie)
+        conn.request('POST', '/', b'', headers)
+        resp = conn.getresponse()
+        resp.read()
+        self.assertEqual(resp.status, 401)
+        cpe.take(resp.getheader('WWW-Authenticate'))
+        conn.request('POST', '/', b'', dict(headers, Authorization=cpe.header()))
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200)
+        self.assertIn(b'SetParameterValues', body)
+
     def test_wrong_password_never_reaches_the_session(self):
         conn, resp, _ = self._open_session(DigestCpe(BOOT_USER, 'nope'))
         self.assertEqual(resp.status, 401)
