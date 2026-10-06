@@ -26,6 +26,7 @@ import {
 } from './AcsFixtures';
 import {MemoryRouter, Route, Routes} from 'react-router-dom';
 import {StyledEngineProvider, ThemeProvider} from '@mui/material/styles';
+import {networkKpiQuery} from './AcsMetrics';
 import {render} from '@testing-library/react';
 
 export function renderAt(
@@ -74,9 +75,9 @@ export function mockPrometheus() {
     .spyOn(MagmaAPI.metrics, 'networksNetworkIdPrometheusQueryGet')
     .mockImplementation(({query}) =>
       Promise.resolve(
-        query === 'acs_rsrp_dbm'
+        query === networkKpiQuery('acs_rsrp_dbm')
           ? vector('cpe_key', rsrp)
-          : query === 'acs_sinr_db'
+          : query === networkKpiQuery('acs_sinr_db')
           ? vector('cpe_key', sinr)
           : vector('x', {}),
       ),
