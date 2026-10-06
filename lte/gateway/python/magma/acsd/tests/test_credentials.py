@@ -11,13 +11,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import threading
 import unittest
 
 import fakeredis
 from magma.acsd.credentials import (
     ACTIVE,
     PENDING,
+    CredentialsBusy,
     CredentialStore,
+    RedisMutex,
     random_password,
 )
 from magma.acsd.digest import ha1_of
@@ -149,6 +152,63 @@ class CredentialStoreTest(unittest.TestCase):
             p = random_password(n)
             self.assertEqual(len(p), n)
             self.assertRegex(p, r'^[A-Za-z0-9_-]+$')
+
+
+
+class CrossProcessTest(unittest.TestCase):
+    """acsd and acsd_cli.py are two CredentialStores on one Redis."""
+
+    def setUp(self):
+        self.redis = fakeredis.FakeStrictRedis()
+        self.acsd = CredentialStore(self.redis, REALM)
+        self.cli = CredentialStore(self.redis, REALM)
+
+    def test_cli_reset_waits_for_a_promotion_in_flight(self):
+        cred, _ = self.acsd.begin_rotation(KEY, 16)
+        entered, go = threading.Event(), threading.Event()
+        real_get = self.acsd.get
+
+        def slow_get(cpe_key):
+            got = real_get(cpe_key)
+            entered.set()
+            go.wait(5)
+            return got
+
+        self.acsd.get = slow_get
+        promote = threading.Thread(
+            target=self.acsd.promote, args=(KEY, cred.pending_generation),
+        )
+        promote.start()
+        self.assertTrue(entered.wait(5))
+        reset = threading.Thread(target=self.cli.reset, args=(KEY,))
+        reset.start()
+        reset.join(0.2)
+        self.assertTrue(reset.is_alive(), 'reset ran during the promotion')
+        go.set()
+        promote.join(5)
+        reset.join(5)
+        # The reset came last and stands; the promotion did not undo it.
+        self.assertFalse(self.cli.get(KEY).rotated)
+        self.assertIsNone(self.cli.owner(cred.pending_username))
+
+    def test_busy_lock_raises(self):
+        self.redis.set('acsd:credentials_lock', 'someone-else')
+        mutex = RedisMutex(self.redis, 'acsd:credentials_lock', wait_sec=0.05)
+        with self.assertRaises(CredentialsBusy):
+            with mutex.held():
+                pass
+
+    def test_release_leaves_another_holder_alone(self):
+        mutex = RedisMutex(self.redis, 'acsd:credentials_lock')
+        with mutex.held():
+            # Our hold expired and another process took the lock.
+            self.redis.set('acsd:credentials_lock', 'someone-else')
+        self.assertEqual(self.redis.get('acsd:credentials_lock'), b'someone-else')
+
+    def test_lock_is_freed_after_each_update(self):
+        self.acsd.begin_rotation(KEY, 16)
+        self.cli.reset(KEY)
+        self.assertIsNone(self.redis.get('acsd:credentials_lock'))
 
 
 if __name__ == '__main__':
