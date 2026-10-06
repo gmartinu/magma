@@ -28,6 +28,7 @@ import (
 
 	"magma/acs/cloud/go/services/acs/cpestate"
 	"magma/acs/cloud/go/services/acs/obsidian/models"
+	"magma/acs/cloud/go/services/acs/reports"
 	"magma/lte/cloud/go/lte"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
@@ -36,9 +37,19 @@ import (
 	entitlements_servicers "magma/orc8r/cloud/go/services/entitlements/servicers/protected"
 	entitlements_test_init "magma/orc8r/cloud/go/services/entitlements/test_init"
 	"magma/orc8r/cloud/go/services/obsidian"
-	state_test_init "magma/orc8r/cloud/go/services/state/test_init"
-	state_test_utils "magma/orc8r/cloud/go/services/state/test_utils"
+	state_protos "magma/orc8r/cloud/go/services/state/protos"
+	state_types "magma/orc8r/cloud/go/services/state/types"
+	"magma/orc8r/cloud/go/test_utils"
+	lib_protos "magma/orc8r/lib/go/protos"
 )
+
+// testReports is the CPE report store of the running test; setupNetwork
+// makes a new one.
+var testReports *reports.Store
+
+func newHandlers(cpes CpeManagers) *Handlers {
+	return NewHandlers(cpes, testReports)
+}
 
 // setupNetwork starts the services the handlers read, with entitlements
 // not enforced, and registers g1/hw1 and g2/hw2 in n1, so both gateways
@@ -51,7 +62,9 @@ func setupNetworkWithEntitlements(t *testing.T, cfg entitlements_servicers.Confi
 	entitlements_test_init.StartTestService(t, cfg, nil)
 	configurator_test_init.StartTestService(t)
 	device_test_init.StartTestService(t)
-	state_test_init.StartTestService(t)
+	factory := test_utils.NewSQLBlobstore(t, "acs_handlers_test_"+strings.NewReplacer("/", "_", "-", "_").Replace(t.Name()))
+	require.NoError(t, factory.InitializeFactory())
+	testReports = reports.NewStore(factory)
 
 	ctx := context.Background()
 	require.NoError(t, configurator.CreateNetwork(ctx, configurator.Network{ID: "n1", Type: lte.NetworkType}, nil))
@@ -62,9 +75,22 @@ func setupNetworkWithEntitlements(t *testing.T, cfg entitlements_servicers.Confi
 	require.NoError(t, err)
 }
 
+// reportCpe is hwID's acsd reporting view now, as the state service hands
+// it to the acs indexer.
 func reportCpe(t *testing.T, hwID string, view *cpestate.CpeView) {
-	ctx := state_test_utils.GetContextWithCertificate(t, hwID)
-	state_test_utils.ReportState(t, ctx, lte.CPEAcsStateType, view.CpeKey, view, cpestate.Serdes)
+	reportCpeAt(t, hwID, view, time.Now())
+}
+
+func reportCpeAt(t *testing.T, hwID string, view *cpestate.CpeView, at time.Time) {
+	raw, err := json.Marshal(view)
+	require.NoError(t, err)
+	st, err := state_types.MakeProtoState(
+		state_types.ID{Type: lte.CPEAcsStateType, DeviceID: view.CpeKey},
+		state_types.SerializedState{SerializedReportedState: raw, ReporterID: hwID, TimeMs: uint64(at.UnixMilli())},
+	)
+	require.NoError(t, err)
+	_, err = reports.NewIndexerServicer(testReports).Index(context.Background(), &state_protos.IndexRequest{NetworkId: "n1", States: []*lib_protos.State{st}})
+	require.NoError(t, err)
 }
 
 // serve runs the route registered for path, so the requireFeature wrapper
@@ -126,7 +152,7 @@ func titan(key, mode string, online bool) *cpestate.CpeView {
 
 func TestListCpes(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers(nil)
+	h := newHandlers(nil)
 
 	assert.Empty(t, listCpes(t, h, ""))
 
@@ -169,7 +195,7 @@ func TestListCpes(t *testing.T) {
 
 func TestListCpesStaleReportIsOffline(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers(nil)
+	h := newHandlers(nil)
 	reportCpe(t, "hw1", titan("IMSI001010000000001", cpestate.ModeCore, true))
 
 	h.now = func() time.Time { return time.Now().Add(stateStaleAfter + time.Minute) }
@@ -180,7 +206,7 @@ func TestListCpesStaleReportIsOffline(t *testing.T) {
 
 func TestGetCpe(t *testing.T) {
 	setupNetwork(t)
-	h := NewHandlers(nil)
+	h := newHandlers(nil)
 	reportCpe(t, "hw2", titan("IMSI001010000000001", cpestate.ModeCore, true))
 
 	rec := serve(t, h, http.MethodGet, CpePath, "/magma/v1/acs/n1/cpes/IMSI001010000000001",
@@ -197,12 +223,59 @@ func TestGetCpe(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+// An IMSI that moved from hw1 to hw2: hw1's acsd keeps reporting it,
+// offline, with its older Inform, and must not take the row back.
+func TestCpeReportedByTwoGatewaysIsServedByTheNewestInform(t *testing.T) {
+	setupNetwork(t)
+	h := newHandlers(nil)
+	moved := titan("IMSI001010000000001", cpestate.ModeCore, true)
+	moved.LastInform = 2000
+	old := titan("IMSI001010000000001", cpestate.ModeCore, false)
+	old.LastInform = 1000
+	reportCpe(t, "hw2", moved)
+	reportCpe(t, "hw1", old) // reported last, as every minute
+
+	cpes := listCpes(t, h, "")
+	require.Len(t, cpes, 1)
+	assert.Equal(t, "g2", cpes[0].GatewayID)
+	assert.True(t, cpes[0].Online)
+	assert.Empty(t, cpes[0].ConflictingGatewayIds)
+	assert.Equal(t, []string{"IMSI001010000000001"}, keys(listCpes(t, h, "?gateway_id=g2")))
+	assert.Empty(t, listCpes(t, h, "?gateway_id=g1"))
+
+	rec := serve(t, h, http.MethodGet, CpePath, "/magma/v1/acs/n1/cpes/IMSI001010000000001",
+		map[string]string{"network_id": "n1", "cpe_key": "IMSI001010000000001"}, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var detail models.AcsCpeDetail
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	assert.Equal(t, "hw2", detail.Cpe.HardwareID)
+}
+
+// One claim ID on two AGWs: two CPEs online under one key.
+func TestClaimIDOnTwoGatewaysIsFlagged(t *testing.T) {
+	setupNetwork(t)
+	h := newHandlers(nil)
+	a := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: 2000}
+	b := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: 1990}
+	reportCpe(t, "hw1", a)
+	reportCpe(t, "hw2", b)
+
+	cpes := listCpes(t, h, "")
+	require.Len(t, cpes, 1)
+	assert.Equal(t, "g1", cpes[0].GatewayID)
+	assert.Equal(t, []string{"g2"}, cpes[0].ConflictingGatewayIds)
+
+	// A stale report of the other gateway is no conflict.
+	reportCpeAt(t, "hw2", b, time.Now().Add(-stateStaleAfter-time.Minute))
+	assert.Empty(t, listCpes(t, h, "")[0].ConflictingGatewayIds)
+}
+
 func TestRequireFeatureGuardsEveryRoute(t *testing.T) {
 	orig := requireFeature
 	defer func() { requireFeature = orig }()
 	requireFeature = func(echo.Context) error { return echo.NewHTTPError(http.StatusForbidden, "acs not entitled") }
 
-	for _, hd := range NewHandlers(nil).GetHandlers() {
+	for _, hd := range NewHandlers(nil, nil).GetHandlers() {
 		c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
 		err := hd.HandlerFunc(c)
 		httpErr, ok := err.(*echo.HTTPError)

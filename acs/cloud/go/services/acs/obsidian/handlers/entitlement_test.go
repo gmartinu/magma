@@ -44,7 +44,7 @@ func entitledStatuses(t *testing.T, enforce, enabled bool) (read, write int) {
 
 	reportCpe(t, "hw2", titan(cpeKey, cpestate.ModeCore, true))
 	acsd := &fakeAcsd{task: rebootTask()}
-	h := NewHandlers(acsd)
+	h := newHandlers(acsd)
 	read = serve(t, h, http.MethodGet, CpesPath, "/magma/v1/acs/n1/cpes", map[string]string{"network_id": "n1"}, "").Code
 	write = serve(t, h, http.MethodPost, TasksPath, "/", cpeParams(), `{"type": "reboot", "max_attempts": 3}`).Code
 	return read, write

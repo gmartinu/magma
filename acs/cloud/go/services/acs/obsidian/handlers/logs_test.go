@@ -49,7 +49,7 @@ func TestSearchLogsPassesTheFilters(t *testing.T) {
 		TotalCount: 7,
 		Logs:       []*models.AcsLog{{Event: models.AcsLogEventCpeSessionCompleted, CpeKey: cpeKey, SessionID: "s1"}},
 	}}
-	h := NewHandlers(nil).WithLogs(logs)
+	h := newHandlers(nil).WithLogs(logs)
 
 	code, body := searchLogs(t, h, "?cpe_key="+cpeKey+"&gateway_id=gw1&event=cpe_task_failed"+
 		"&start=2026-10-06T10:00:00Z&end=2026-10-06T11:00:00Z&size=20&from=40")
@@ -75,7 +75,7 @@ func TestSearchLogsPassesTheFilters(t *testing.T) {
 
 func TestSearchLogsDefaults(t *testing.T) {
 	logs := &fakeLogs{page: &models.AcsLogs{Logs: []*models.AcsLog{}}}
-	code, _ := searchLogs(t, NewHandlers(nil).WithLogs(logs), "")
+	code, _ := searchLogs(t, newHandlers(nil).WithLogs(logs), "")
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, sessionlog.Query{NetworkID: "n1", Size: defaultLogsSize}, *logs.got)
 }
@@ -93,18 +93,18 @@ func TestSearchLogsRefusesBadParameters(t *testing.T) {
 		"?from=9950&size=100",
 	} {
 		logs := &fakeLogs{}
-		code, _ := searchLogs(t, NewHandlers(nil).WithLogs(logs), query)
+		code, _ := searchLogs(t, newHandlers(nil).WithLogs(logs), query)
 		assert.Equal(t, http.StatusBadRequest, code, query)
 		assert.Nil(t, logs.got, query)
 	}
 }
 
 func TestSearchLogsWithoutElasticsearch(t *testing.T) {
-	code, _ := searchLogs(t, NewHandlers(nil), "")
+	code, _ := searchLogs(t, newHandlers(nil), "")
 	assert.Equal(t, http.StatusServiceUnavailable, code)
 }
 
 func TestSearchLogsSearchError(t *testing.T) {
-	code, _ := searchLogs(t, NewHandlers(nil).WithLogs(&fakeLogs{err: errors.New("es down")}), "")
+	code, _ := searchLogs(t, newHandlers(nil).WithLogs(&fakeLogs{err: errors.New("es down")}), "")
 	assert.Equal(t, http.StatusInternalServerError, code)
 }
