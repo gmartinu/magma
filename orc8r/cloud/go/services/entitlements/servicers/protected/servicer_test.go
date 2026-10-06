@@ -153,6 +153,84 @@ func TestTenantsDown(t *testing.T) {
 	assert.False(t, got.HasTenant)
 }
 
+func TestSharedNetworkGetsTheMostRestrictiveEntitlements(t *testing.T) {
+	ctx := context.Background()
+	s := newServicer(t, servicers.Config{Enforce: true}, tenantsOf(map[int64][]string{7: {"shared"}, 3: {"shared", "own"}}))
+	set := func(tenant int64, ents ...*protos.Entitlement) {
+		_, err := s.SetEntitlements(ctx, &protos.SetEntitlementsRequest{TenantId: tenant, Entitlements: ents, Replace: true})
+		require.NoError(t, err)
+	}
+	soon, later := now.Unix()+3600, now.Unix()+7*24*3600
+	set(3,
+		&protos.Entitlement{Feature: "acs", Enabled: true, NotAfter: later},
+		&protos.Entitlement{Feature: "only_three", Enabled: true},
+		&protos.Entitlement{Feature: "off_in_seven", Enabled: true},
+	)
+	set(7,
+		&protos.Entitlement{Feature: "acs", Enabled: true, NotAfter: soon},
+		&protos.Entitlement{Feature: "off_in_seven", Enabled: false},
+	)
+
+	got, err := s.GetNetworkEntitlements(ctx, &protos.NetworkRequest{NetworkId: "shared"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), got.TenantId, "lowest tenant ID, whatever the list order")
+	// only_three: tenant 7 lacks it, so the shared network does too.
+	assert.Equal(t, []string{"acs", "off_in_seven"}, features(got.Entitlements))
+	assert.Equal(t, soon, got.Entitlements[0].NotAfter)
+	assert.False(t, got.Entitlements[1].Enabled)
+
+	got, err = s.GetNetworkEntitlements(ctx, &protos.NetworkRequest{NetworkId: "own"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"acs", "off_in_seven", "only_three"}, features(got.Entitlements))
+}
+
+func TestStricter(t *testing.T) {
+	day := int64(24 * 3600)
+	never := &protos.Entitlement{Feature: "acs", Enabled: true}
+	shortGrace := &protos.Entitlement{Feature: "acs", Enabled: true, NotAfter: 10 * day, GraceDays: 1}
+	longGrace := &protos.Entitlement{Feature: "acs", Enabled: true, NotAfter: 5 * day, GraceDays: 30}
+	off := &protos.Entitlement{Feature: "acs", Enabled: false}
+	assert.True(t, servicers.Stricter(off, shortGrace))
+	assert.True(t, servicers.Stricter(shortGrace, longGrace), "frozen first wins over expired first")
+	assert.True(t, servicers.Stricter(longGrace, never))
+	assert.False(t, servicers.Stricter(never, never))
+}
+
+func TestTenantListIsReused(t *testing.T) {
+	ctx := context.Background()
+	at := now
+	calls := 0
+	var fail bool
+	lister := func(context.Context) (*tenant_protos.TenantList, error) {
+		calls++
+		if fail {
+			return nil, errors.New("down")
+		}
+		return &tenant_protos.TenantList{Tenants: []*tenant_protos.IDAndTenant{{Id: 1, Tenant: &tenant_protos.Tenant{Networks: []string{"n1"}}}}}, nil
+	}
+	store := storage.NewBlobstoreStore(test_utils.NewSQLBlobstore(t, "entitlements_servicer_ttl_test"))
+	s := servicers.NewServicer(store, servicers.Config{Enforce: true}, lister, func() time.Time { return at })
+	req := &protos.NetworkRequest{NetworkId: "n1"}
+
+	for i := 0; i < 3; i++ {
+		_, err := s.GetNetworkEntitlements(ctx, req)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, calls)
+
+	at = at.Add(time.Minute)
+	_, err := s.GetNetworkEntitlements(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
+
+	// Past the TTL with the tenants service down: the last list stands.
+	at, fail = at.Add(time.Minute), true
+	got, err := s.GetNetworkEntitlements(ctx, req)
+	require.NoError(t, err)
+	assert.True(t, got.HasTenant)
+	assert.Equal(t, 3, calls)
+}
+
 func features(ents []*protos.Entitlement) []string {
 	ret := []string{}
 	for _, e := range ents {
