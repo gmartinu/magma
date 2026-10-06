@@ -44,6 +44,7 @@ from magma.acsd.digest import (
 from magma.acsd.events import AcsEvents, EventEmitter
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
+from magma.acsd.reach import Reacher
 from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
@@ -198,17 +199,20 @@ def main():
     metrics = AcsMetrics(get_cpe_kpi_config(config))
     events = AcsEvents(EventEmitter().start())
     store = AcsStore(client, listener=StoreListeners(metrics, events))
-    views = CpeViews(store, service.mconfig.periodic_inform_interval)
-    events.mode_of = views.mode_of
-    # A new process cannot continue the HTTP exchanges of the last one.
-    requeued = store.end_all_sessions('acsd restarted')
-    if requeued:
-        logging.info('Requeued %d tasks left in progress', requeued)
     auth = get_cwmp_auth(config)
     wan = get_cwmp_wan(config, auth)
     reach = get_reach_config(config, service.mconfig)
     claimed = make_claimed_mode(wan, store, client, reach)
     frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
+    reacher = Reacher(
+        reach, store, claimed.credentials if claimed else None, client, frozen,
+    )
+    views = CpeViews(store, service.mconfig.periodic_inform_interval, reacher=reacher)
+    events.mode_of = views.mode_of
+    # A new process cannot continue the HTTP exchanges of the last one.
+    requeued = store.end_all_sessions('acsd restarted')
+    if requeued:
+        logging.info('Requeued %d tasks left in progress', requeued)
     handler = CwmpSessionHandler(
         identify=SessionIdentifier(), store=store, claimed=claimed,
         observer=metrics, frozen=frozen,

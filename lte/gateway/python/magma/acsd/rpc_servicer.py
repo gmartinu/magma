@@ -17,6 +17,7 @@ Orc8r over SyncRPC (the ctraced pattern) and for local tooling.
 """
 
 import logging
+from typing import Optional
 
 import grpc
 from lte.protos import cpe_acs_pb2 as pb
@@ -31,9 +32,20 @@ from magma.acsd.cpe_state import (
     CpeView,
     CpeViews,
 )
-from magma.acsd.store import TASK_MAX_ATTEMPTS, TASK_TTL_SEC, AcsStore, Task
+from magma.acsd.reach import CONNECTION_REQUEST, NEXT_INFORM
+from magma.acsd.store import (
+    TASK_MAX_ATTEMPTS,
+    TASK_PENDING,
+    TASK_TTL_SEC,
+    AcsStore,
+    Task,
+)
 
 _MODES = {MODE_CORE: pb.CPE_MODE_CORE, MODE_CLAIMED: pb.CPE_MODE_CLAIMED}
+_REACH = {
+    CONNECTION_REQUEST: pb.CPE_REACH_CONNECTION_REQUEST,
+    NEXT_INFORM: pb.CPE_REACH_NEXT_INFORM,
+}
 _TYPE_PREFIX = 'CPE_TASK_TYPE_'
 _STATUS_PREFIX = 'CPE_TASK_STATUS_'
 CONNECTION_REQUEST_UNIMPLEMENTED = (
@@ -80,7 +92,7 @@ class CpeManagerRpcServicer(CpeManagerServicer):
         except tasks.InvalidTask as err:
             return _error(context, grpc.StatusCode.INVALID_ARGUMENT, str(err), pb.CpeTask())
         logging.info('Queued task %s (%s) for %s', task.task_id, task.type, task.cpe_key)
-        return task_to_proto(task, self._imsi(task.cpe_key))
+        return task_to_proto(task, self._views.get(task.cpe_key))
 
     def GetTask(self, request: pb.GetTaskRequest, context) -> pb.CpeTask:
         task = self._store.get_task(request.task_id) if request.task_id else None
@@ -89,7 +101,7 @@ class CpeManagerRpcServicer(CpeManagerServicer):
                 context, grpc.StatusCode.NOT_FOUND,
                 'no task %r' % request.task_id, pb.CpeTask(),
             )
-        return task_to_proto(task, self._imsi(task.cpe_key))
+        return task_to_proto(task, self._views.get(task.cpe_key))
 
     def ListCpes(self, request: pb.ListCpesRequest, context) -> pb.ListCpesResponse:
         return pb.ListCpesResponse(cpes=[cpe_to_proto(v) for v in self._views.list()])
@@ -104,16 +116,11 @@ class CpeManagerRpcServicer(CpeManagerServicer):
         cpe = cpe_to_proto(view)
         cpe.model.update(view.model)
         cpe.tasks.extend(
-            task_to_proto(t, view.imsi) for t in self._store.list_tasks(view.cpe_key)
+            task_to_proto(t, view) for t in self._store.list_tasks(view.cpe_key)
         )
         if request.include_parameters:
             cpe.parameters.update(self._store.get_parameters(view.cpe_key).values)
         return cpe
-
-    def _imsi(self, cpe_key: str) -> str:
-        """The IMSI of a CPE as its view reports it; '' before its first Inform."""
-        view = self._views.get(cpe_key)
-        return view.imsi if view else ''
 
     def ConnectionRequest(
         self, request: pb.ConnectionRequestRequest, context,
@@ -124,11 +131,15 @@ class CpeManagerRpcServicer(CpeManagerServicer):
         )
 
 
-def task_to_proto(task: Task, imsi: str = '') -> pb.CpeTask:
+def task_to_proto(task: Task, view: Optional[CpeView] = None) -> pb.CpeTask:
+    """
+    The task with what its CPE's view says: the IMSI, and for a pending
+    task how and when it will run. No view before the CPE's first Inform.
+    """
     out = pb.CpeTask(
         task_id=task.task_id,
         cpe_key=task.cpe_key,
-        imsi=imsi,
+        imsi=view.imsi if view else '',
         type=_enum(pb.CpeTaskType, _TYPE_PREFIX, task.type),
         status=_enum(pb.CpeTaskStatus, _STATUS_PREFIX, task.status),
         attempts=task.attempts,
@@ -141,6 +152,9 @@ def task_to_proto(task: Task, imsi: str = '') -> pb.CpeTask:
     )
     out.args.update(task.args)
     out.result.update(task.result)
+    if view is not None and task.status == TASK_PENDING:
+        out.reach = _REACH.get(view.reach, pb.CPE_REACH_UNSPECIFIED)
+        out.next_inform = view.next_inform
     return out
 
 
@@ -159,12 +173,16 @@ def cpe_to_proto(view: CpeView) -> pb.Cpe:
         informs_total=view.informs_total,
         online=view.online,
         pending_tasks=view.pending_tasks,
+        reach=_REACH.get(view.reach, pb.CPE_REACH_UNSPECIFIED),
+        reach_reason=view.reach_reason,
+        next_inform=view.next_inform,
     )
     if view.last_session:
         session = dict(view.last_session)
-        # The CPE carries these itself.
+        # The CPE carries these itself; the source IP is not part of the API.
         session.pop('cpe_key', None)
         session.pop('mode', None)
+        session.pop('source_ip', None)
         cpe.last_session.CopyFrom(pb.CpeSession(**session))
     return cpe
 

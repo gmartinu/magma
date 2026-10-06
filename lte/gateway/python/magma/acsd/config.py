@@ -156,6 +156,15 @@ def get_cwmp_wan(
 
 
 DEFAULT_CLAIMED_INFORM_INTERVAL_SEC = 300
+# When acsd sends Connection Requests: `auto` only to URLs that look
+# reachable (reach.py), `always` to any URL, `off` never.
+CONNECTION_REQUEST_AUTO = 'auto'
+CONNECTION_REQUEST_ALWAYS = 'always'
+CONNECTION_REQUEST_OFF = 'off'
+CONNECTION_REQUEST_MODES = (
+    CONNECTION_REQUEST_AUTO, CONNECTION_REQUEST_ALWAYS, CONNECTION_REQUEST_OFF,
+)
+DEFAULT_CONNECTION_REQUEST_TIMEOUT_SECS = 5.0
 
 
 @dataclass(frozen=True)
@@ -163,6 +172,8 @@ class ReachConfig:
     """How acsd gets queued tasks to claimed CPEs (the `cwmp_reach` section)."""
     # PeriodicInformInterval set on claimed CPEs at BOOTSTRAP; 0 leaves theirs.
     periodic_inform_interval: int = DEFAULT_CLAIMED_INFORM_INTERVAL_SEC
+    connection_request: str = CONNECTION_REQUEST_AUTO
+    connection_request_timeout_secs: float = DEFAULT_CONNECTION_REQUEST_TIMEOUT_SECS
 
 
 def get_reach_config(
@@ -172,12 +183,25 @@ def get_reach_config(
     """
     Resolve the `cwmp_reach` section of acsd.yml. The mconfig
     periodic_inform_interval wins when set, as the port does, so Orc8r can
-    tune it per network; 0 (proto default) falls back to acsd.yml.
+    tune it per network; 0 (proto default) falls back to acsd.yml. An
+    unknown connection_request mode is an error, as cwmp_auth's is.
     """
     section = service_config.get('cwmp_reach') or {}
     interval = section.get('periodic_inform_interval')
     if interval is None:
         interval = DEFAULT_CLAIMED_INFORM_INTERVAL_SEC
+    mode = section.get('connection_request', CONNECTION_REQUEST_AUTO)
+    if mode is False:
+        # YAML 1.1 reads an unquoted `off` as false.
+        mode = CONNECTION_REQUEST_OFF
+    mode = str(mode).lower()
+    if mode not in CONNECTION_REQUEST_MODES:
+        raise ValueError('unknown cwmp_reach connection_request %r' % mode)
+    timeout = section.get('connection_request_timeout_secs')
     return ReachConfig(
         periodic_inform_interval=max(0, mconfig.periodic_inform_interval or int(interval)),
+        connection_request=mode,
+        connection_request_timeout_secs=max(
+            0.5, float(timeout or DEFAULT_CONNECTION_REQUEST_TIMEOUT_SECS),
+        ),
     )
