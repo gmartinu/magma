@@ -14,6 +14,8 @@ limitations under the License.
 package main
 
 import (
+	"time"
+
 	"github.com/golang/glog"
 
 	"magma/acs/cloud/go/acs"
@@ -30,6 +32,7 @@ import (
 	state_protos "magma/orc8r/cloud/go/services/state/protos"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/storage"
+	"magma/orc8r/lib/go/service/config"
 )
 
 func main() {
@@ -49,7 +52,12 @@ func main() {
 	cpeReports := reports.NewStore(factory)
 	state_protos.RegisterIndexerServer(srv.ProtectedGrpcServer, reports.NewIndexerServicer(cpeReports))
 
-	h := handlers.NewHandlers(handlers.NewSyncRPCCpeManagers(), cpeReports)
+	cfg := acs_service.Config{StaleCpeAfterHours: acs_service.DefaultStaleCpeAfterHours}
+	if _, _, err := config.GetStructuredServiceConfig(acs.ModuleName, acs_service.ServiceName, &cfg); err != nil {
+		glog.Warningf("Using the default acs config: %s", err)
+	}
+	h := handlers.NewHandlers(handlers.NewSyncRPCCpeManagers(), cpeReports).
+		WithStaleCpeAfter(time.Duration(cfg.StaleCpeAfterHours) * time.Hour)
 	// The same Elasticsearch, from orc8r's elastic.yml, as the events API.
 	if es, err := eventd_client.GetElasticClient(); err != nil {
 		glog.Errorf("Session log search disabled: %s", err)
