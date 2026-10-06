@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -59,6 +60,9 @@ func (h *Handlers) searchLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	page, err := h.logs.Search(c.Request().Context(), q)
+	if errors.Is(err, sessionlog.ErrUnavailable) {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "the session log search is unavailable: Elasticsearch cannot be reached")
+	}
 	if err != nil {
 		return obsidian.MakeHTTPError(err, http.StatusInternalServerError)
 	}
