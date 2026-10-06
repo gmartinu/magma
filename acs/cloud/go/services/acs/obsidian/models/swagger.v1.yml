@@ -22,6 +22,10 @@ magma-gen-meta:
       filename: acs_task_request_swaggergen.go
     - go-struct-name: AcsTask
       filename: acs_task_swaggergen.go
+    - go-struct-name: AcsLog
+      filename: acs_log_swaggergen.go
+    - go-struct-name: AcsLogs
+      filename: acs_logs_swaggergen.go
 
 info:
   title: ACS
@@ -179,6 +183,69 @@ paths:
           description: The task
           schema:
             $ref: '#/definitions/acs_task'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /acs/{network_id}/logs:
+    get:
+      summary: Search the session log of the network's CPEs
+      description: >
+        The events acsd sends to eventd (one cpe_session_completed per CWMP
+        session, one cpe_task_failed per task out of retries), newest first,
+        as fluentd indexed them into the eventd-* Elasticsearch indices. Kept
+        for the Elasticsearch retention.
+      tags:
+        - ACS
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - in: query
+          name: cpe_key
+          description: Only records of this CPE
+          required: false
+          type: string
+        - in: query
+          name: gateway_id
+          description: Only records sent by this gateway
+          required: false
+          type: string
+        - in: query
+          name: event
+          description: Only records of this event
+          required: false
+          type: string
+          enum:
+            - cpe_session_completed
+            - cpe_task_failed
+        - in: query
+          name: start
+          description: Only records at or after this time (RFC 3339)
+          required: false
+          type: string
+          format: date-time
+        - in: query
+          name: end
+          description: Only records at or before this time (RFC 3339)
+          required: false
+          type: string
+          format: date-time
+        - in: query
+          name: size
+          description: Records per page (1-1000, default 100)
+          required: false
+          type: integer
+          minimum: 1
+          maximum: 1000
+        - in: query
+          name: from
+          description: Records to skip, for the next pages
+          required: false
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: A page of records
+          schema:
+            $ref: '#/definitions/acs_logs'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
@@ -468,4 +535,93 @@ definitions:
         type: string
         format: date-time
       imsi:
+        type: string
+
+  acs_logs:
+    description: A page of session log records
+    type: object
+    required:
+      - total_count
+      - logs
+    properties:
+      total_count:
+        description: Records matching the query, on every page
+        x-nullable: false
+        type: integer
+        format: int64
+      logs:
+        type: array
+        items:
+          $ref: '#/definitions/acs_log'
+
+  acs_log:
+    description: >
+      One acsd event. Session fields are set on cpe_session_completed, task
+      fields on cpe_task_failed (lte/swagger/cpe_acs_events.v1.yml).
+    type: object
+    required:
+      - time
+      - event
+      - cpe_key
+    properties:
+      time:
+        description: When eventd received the event
+        x-nullable: false
+        type: string
+        format: date-time
+      event:
+        x-nullable: false
+        type: string
+        enum:
+          - cpe_session_completed
+          - cpe_task_failed
+      cpe_key:
+        x-nullable: false
+        type: string
+      imsi:
+        description: Empty when acsd does not know the CPE's IMSI
+        type: string
+      gateway_id:
+        type: string
+      hardware_id:
+        type: string
+      session_id:
+        type: string
+      result:
+        description: completed, timed_out or interrupted
+        type: string
+      reason:
+        type: string
+      started:
+        x-nullable: true
+        type: string
+        format: date-time
+      ended:
+        x-nullable: true
+        type: string
+        format: date-time
+      tasks_done:
+        type: integer
+        format: int32
+      tasks_failed:
+        type: integer
+        format: int32
+      faults:
+        type: integer
+        format: int32
+      task_id:
+        type: string
+      task_type:
+        type: string
+      attempts:
+        type: integer
+        format: int32
+      max_attempts:
+        type: integer
+        format: int32
+      fault_code:
+        description: 0 when the task failed because its sessions kept dropping
+        type: integer
+        format: int32
+      fault_string:
         type: string
