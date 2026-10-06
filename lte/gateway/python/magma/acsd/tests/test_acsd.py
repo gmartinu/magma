@@ -257,6 +257,12 @@ class ShippedConfigTest(unittest.TestCase):
         self.assertFalse(wan.enabled)
         self.assertEqual(wan.bind, CwmpBind('eth0', '0.0.0.0', 48443))
         self.assertTrue(wan.cert_path and wan.key_path)
+        reach = get_reach_config(cfg, mconfigs_pb2.AcsD())
+        self.assertEqual(
+            (reach.periodic_inform_interval, reach.connection_request,
+             reach.connection_request_timeout_secs),
+            (300, 'auto', 5.0),
+        )
 
     def test_gateway_mconfig_entry(self):
         with open(os.path.join(CONFIG_DIR, 'gateway.mconfig')) as f:
