@@ -8,6 +8,7 @@
 magma_services:
   - mobilityd
   - acsd
+  - eventd
 non_service303_services: []
 # The stock links (mme, pipelined, ...) name services this env lacks.
 linked_services: []
