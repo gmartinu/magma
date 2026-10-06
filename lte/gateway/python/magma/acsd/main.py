@@ -106,6 +106,7 @@ def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
 
 def make_claimed_mode(
     wan: CwmpWanConfig, store: AcsStore, client, reach: ReachConfig = ReachConfig(),
+    observers=(),
 ) -> Optional[ClaimedMode]:
     """Claimed mode for the WAN listener, or None when it is off."""
     if not wan.enabled:
@@ -130,7 +131,7 @@ def make_claimed_mode(
     mode = ClaimedMode(
         ClaimRegistry(client, forget=forget), credentials, store,
         wan.bootstrap_username, wan.bootstrap_password,
-        reach.periodic_inform_interval,
+        reach.periodic_inform_interval, observers,
     )
     modes.append(mode)
     return mode
@@ -222,7 +223,7 @@ def main():
     auth = get_cwmp_auth(config)
     wan = get_cwmp_wan(config, auth)
     reach = get_reach_config(config, service.mconfig)
-    claimed = make_claimed_mode(wan, store, client, reach)
+    claimed = make_claimed_mode(wan, store, client, reach, (metrics, events))
     frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
     reacher = Reacher(
         reach, store, claimed.credentials if claimed else None, client, frozen,

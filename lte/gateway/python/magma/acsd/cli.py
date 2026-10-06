@@ -20,6 +20,7 @@ import ipaddress
 import os
 import subprocess
 import sys
+import time
 from typing import List, Optional
 
 from magma.acsd.claims import ClaimError, ClaimRegistry, cpe_key_of
@@ -56,6 +57,18 @@ def _parser() -> argparse.ArgumentParser:
         help='let a claimed CPE bootstrap again (e.g. after a factory reset)',
     )
     reset.add_argument('claim_id')
+
+    allow = sub.add_parser(
+        'allow-rebootstrap',
+        help='let a claimed CPE that has its own credential log in once with '
+        'the bootstrap one (e.g. factory reset in the field); it then gets a '
+        'new credential',
+    )
+    allow.add_argument('claim_id')
+    allow.add_argument(
+        '--ttl-mins', type=int, default=60,
+        help='how long the approval lasts (default: 60)',
+    )
 
     rotate = sub.add_parser(
         'rotate-credentials',
@@ -126,6 +139,21 @@ def run(argv: List[str], client=None, out=sys.stdout) -> int:
             return 1
         creds.reset(cpe_key_of(args.claim_id))
         print('%s may bootstrap again' % args.claim_id, file=out)
+    elif args.command == 'allow-rebootstrap':
+        if claims.get(args.claim_id) is None:
+            print('error: no claim %s' % args.claim_id, file=out)
+            return 1
+        key = cpe_key_of(args.claim_id)
+        if not creds.get(key).rotated:
+            print(
+                '%s is still on the bootstrap credential; it needs no '
+                'approval' % args.claim_id, file=out,
+            )
+            return 0
+        until = creds.allow_rebootstrap(key, args.ttl_mins * 60)
+        print('%s may bootstrap once until %s' % (
+            args.claim_id, time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(until)),
+        ), file=out)
     elif args.command == 'rotate-credentials':
         if claims.get(args.claim_id) is None:
             print('error: no claim %s' % args.claim_id, file=out)
