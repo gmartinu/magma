@@ -19,13 +19,18 @@ credential, that credential afterwards. The bootstrap session queues a
 rotation that sets the per-CPE credential by SetParameterValues through the
 ordinary task queue; it becomes the only accepted one once the CPE applies
 it.
+
+At BOOTSTRAP the session also sets a short PeriodicInformInterval: a carrier
+NAT usually keeps acsd from sending a Connection Request, so a queued task
+waits for the CPE's next periodic Inform, and the CPE's factory interval
+(often a day) would be the task latency.
 """
 
 import dataclasses
 import hmac
 import logging
 import threading
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from magma.acsd import tasks
 from magma.acsd.claims import ClaimRegistry
@@ -37,7 +42,10 @@ from spyne.model.complex import ComplexModelBase
 
 # Internal task type: not in tasks.TYPES, so no external caller can queue it.
 ROTATE_CREDENTIALS = 'rotate_credentials'
+CONFIGURE_PERIODIC_INFORM = 'configure_periodic_inform'
+INTERNAL_TYPES = (ROTATE_CREDENTIALS, CONFIGURE_PERIODIC_INFORM)
 ROTATION_TTL_SEC = 24 * 3600
+EVENT_BOOTSTRAP = '0 BOOTSTRAP'
 
 
 class ClaimedMode:
@@ -57,12 +65,18 @@ class ClaimedMode:
         store: AcsStore,
         bootstrap_username: str,
         bootstrap_password: str,
+        periodic_inform_interval: int = 0,
     ):
+        """
+        `periodic_inform_interval` (seconds) is set on every claimed CPE that
+        Informs with BOOTSTRAP; 0 leaves the CPE's own.
+        """
         self._claims = claims
         self._credentials = credentials
         self._store = store
         self._bootstrap_username = bootstrap_username
         self._bootstrap_password = bootstrap_password
+        self._periodic_inform_interval = max(0, int(periodic_inform_interval))
         self._lock = threading.Lock()
         # cpe_key -> (generation, password) of the rotation in flight.
         self._passwords: Dict[str, Tuple[int, str]] = {}
@@ -134,10 +148,32 @@ class ClaimedMode:
         return key
 
     def session_started(
+        self,
+        cpe_key: str,
+        username: Optional[str],
+        handler: Handler,
+        events: Sequence[str] = (),
+        root: str = 'Device.',
+    ) -> None:
+        """
+        Queue what a claimed CPE needs first: a credential rotation while it
+        is on the bootstrap credential, then, on BOOTSTRAP, the periodic
+        Inform settings.
+        """
+        self._maybe_rotate(cpe_key, username, handler)
+        if EVENT_BOOTSTRAP in events:
+            self._configure_periodic_inform(cpe_key, root)
+
+    def _maybe_rotate(
         self, cpe_key: str, username: Optional[str], handler: Handler,
     ) -> None:
-        """Queue a credential rotation for a CPE still on the bootstrap one."""
-        if not self.is_bootstrap(username):
+        """
+        Rotate a CPE on the bootstrap credential, and one on its own that
+        has no Connection Request credential: rotated before acsd set those,
+        or told to by `acsd_cli.py rotate-credentials`.
+        """
+        bootstrap = self.is_bootstrap(username)
+        if not bootstrap and self._credentials.get(cpe_key).cr_password:
             return
         if handler.quirks.no_credential_rotation:
             logging.info(
@@ -168,26 +204,85 @@ class ClaimedMode:
             )
             self._credentials.set_rotation_task(cpe_key, task.task_id)
         logging.info(
-            'acsd claimed: %s on the bootstrap credential; rotation %s queued',
-            cpe_key, task.task_id,
+            'acsd claimed: %s %s; rotation %s queued', cpe_key,
+            'on the bootstrap credential' if bootstrap
+            else 'without a Connection Request credential',
+            task.task_id,
+        )
+
+    def _configure_periodic_inform(self, cpe_key: str, root: str) -> None:
+        """
+        Every BOOTSTRAP, even when acsd set it before: a factory reset is
+        what usually brings one, and it restores the factory interval.
+        """
+        if not self._periodic_inform_interval:
+            return
+        live = any(
+            t.type == CONFIGURE_PERIODIC_INFORM
+            and t.status in (TASK_PENDING, TASK_IN_PROGRESS)
+            for t in self._store.list_tasks(cpe_key)
+        )
+        if live:
+            return
+        ms = root + 'ManagementServer.'
+        task = self._store.create_task(
+            cpe_key, CONFIGURE_PERIODIC_INFORM,
+            {'parameter_values': [
+                {'name': ms + 'PeriodicInformEnable', 'value': 'true', 'type': 'xsd:boolean'},
+                {
+                    'name': ms + 'PeriodicInformInterval',
+                    'value': str(self._periodic_inform_interval),
+                    'type': 'xsd:unsignedInt',
+                },
+            ]},
+            ttl_sec=ROTATION_TTL_SEC,
+        )
+        logging.info(
+            'acsd claimed: %s bootstrapped; periodic Inform every %ds queued (%s)',
+            cpe_key, self._periodic_inform_interval, task.task_id,
         )
 
     def plan(self, task: Task, root: str) -> List[ComplexModelBase]:
+        """The requests of an internal task (one of INTERNAL_TYPES)."""
+        if task.type == CONFIGURE_PERIODIC_INFORM:
+            return tasks.plan(
+                dataclasses.replace(task, type=tasks.SET_PARAMETER_VALUES), root,
+            )
+        return self._plan_rotation(task, root)
+
+    def recorded_values(self, task: Task) -> Dict[str, str]:
+        """
+        What a finished internal task set that belongs in the CPE's snapshot,
+        so its model, online state and next Inform reflect it. Credentials
+        never do.
+        """
+        if task.type != CONFIGURE_PERIODIC_INFORM:
+            return {}
+        return {p['name']: p['value'] for p in task.args.get('parameter_values', [])}
+
+    def _plan_rotation(self, task: Task, root: str) -> List[ComplexModelBase]:
         """The SetParameterValues of a rotation; [] when already applied."""
         generation = int(task.args.get('generation', 0))
-        if self._credentials.get(task.cpe_key).generation >= generation:
+        cred = self._credentials.get(task.cpe_key)
+        if cred.generation >= generation:
             return []
         with self._lock:
             held = self._passwords.get(task.cpe_key)
         if held is None or held[0] != generation:
             raise tasks.InvalidTask('rotation password lost (acsd restarted?)')
+        if cred.pending_generation != generation or not cred.pending_cr_password:
+            raise tasks.InvalidTask('rotation replaced or aborted')
         ms = root + 'ManagementServer.'
+        username = task.args['username']
+        # One SPV, so the CPE applies both credentials or neither.
         spv = dataclasses.replace(
             task,
             type=tasks.SET_PARAMETER_VALUES,
             args={'parameter_values': [
-                {'name': ms + 'Username', 'value': task.args['username']},
+                {'name': ms + 'Username', 'value': username},
                 {'name': ms + 'Password', 'value': held[1]},
+                {'name': ms + 'ConnectionRequestUsername', 'value': username},
+                {'name': ms + 'ConnectionRequestPassword', 'value': cred.pending_cr_password},
             ]},
         )
         return tasks.plan(spv, root)

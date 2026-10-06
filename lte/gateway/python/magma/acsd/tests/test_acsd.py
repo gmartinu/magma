@@ -33,6 +33,7 @@ from magma.acsd.config import (
     get_cwmp_bind,
     get_cwmp_wan,
     get_cwmp_workers,
+    get_reach_config,
 )
 from magma.acsd.datamodel import DEFAULT_REGISTRY
 from magma.acsd.digest import DigestAuthenticator
@@ -75,6 +76,40 @@ class CwmpWorkersTest(unittest.TestCase):
 
     def test_never_below_one(self):
         self.assertEqual(get_cwmp_workers({'cwmp_workers': 0}), 1)
+
+
+class ReachConfigTest(unittest.TestCase):
+    def test_default_interval_is_short(self):
+        self.assertEqual(get_reach_config({}, mconfigs_pb2.AcsD()).periodic_inform_interval, 300)
+
+    def test_from_yml(self):
+        cfg = {'cwmp_reach': {'periodic_inform_interval': 120}}
+        self.assertEqual(get_reach_config(cfg, mconfigs_pb2.AcsD()).periodic_inform_interval, 120)
+
+    def test_zero_in_yml_leaves_the_cpe_value(self):
+        cfg = {'cwmp_reach': {'periodic_inform_interval': 0}}
+        self.assertEqual(get_reach_config(cfg, mconfigs_pb2.AcsD()).periodic_inform_interval, 0)
+
+    def test_connection_request_modes(self):
+        self.assertEqual(get_reach_config({}, mconfigs_pb2.AcsD()).connection_request, 'auto')
+        for raw, mode in (('always', 'always'), ('OFF', 'off'), (False, 'off')):
+            cfg = {'cwmp_reach': {'connection_request': raw}}
+            self.assertEqual(get_reach_config(cfg, mconfigs_pb2.AcsD()).connection_request, mode)
+        with self.assertRaises(ValueError):
+            get_reach_config({'cwmp_reach': {'connection_request': 'sometimes'}}, mconfigs_pb2.AcsD())
+
+    def test_connection_request_timeout(self):
+        reach = get_reach_config({}, mconfigs_pb2.AcsD())
+        self.assertEqual(reach.connection_request_timeout_secs, 5.0)
+        cfg = {'cwmp_reach': {'connection_request_timeout_secs': 0.01}}
+        self.assertEqual(
+            get_reach_config(cfg, mconfigs_pb2.AcsD()).connection_request_timeout_secs, 0.5,
+        )
+
+    def test_mconfig_wins_when_set(self):
+        cfg = {'cwmp_reach': {'periodic_inform_interval': 120}}
+        reach = get_reach_config(cfg, mconfigs_pb2.AcsD(periodic_inform_interval=60))
+        self.assertEqual(reach.periodic_inform_interval, 60)
 
 
 class CwmpAuthConfigTest(unittest.TestCase):
@@ -222,6 +257,12 @@ class ShippedConfigTest(unittest.TestCase):
         self.assertFalse(wan.enabled)
         self.assertEqual(wan.bind, CwmpBind('eth0', '0.0.0.0', 48443))
         self.assertTrue(wan.cert_path and wan.key_path)
+        reach = get_reach_config(cfg, mconfigs_pb2.AcsD())
+        self.assertEqual(
+            (reach.periodic_inform_interval, reach.connection_request,
+             reach.connection_request_timeout_secs),
+            (300, 'auto', 5.0),
+        )
 
     def test_gateway_mconfig_entry(self):
         with open(os.path.join(CONFIG_DIR, 'gateway.mconfig')) as f:

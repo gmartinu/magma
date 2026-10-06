@@ -19,7 +19,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from magma.acsd import tasks
-from magma.acsd.claimed import ROTATE_CREDENTIALS
+from magma.acsd.claimed import INTERNAL_TYPES
 from magma.acsd.config import LISTENER_MODE, MODE_CLAIMED, MODE_CORE
 from magma.acsd.datamodel import (
     DEFAULT_REGISTRY,
@@ -220,7 +220,9 @@ class CwmpSessionHandler:
             self._store.merge_parameters(identity, values)
         self._update_model(session, device_id_identity(inform))
         if mode == MODE_CLAIMED and not self._frozen:
-            self._claimed.session_started(identity, username, handler)
+            self._claimed.session_started(
+                identity, username, handler, _event_codes(inform), session.root,
+            )
         logging.info(
             'Inform from %s (serial %s, identity %s, handler %s, '
             '%d tasks pending)', source_ip, serial, identity, handler.name,
@@ -335,7 +337,7 @@ class CwmpSessionHandler:
         return task
 
     def _plan(self, task: Task, session: Session) -> List[ComplexModelBase]:
-        if session.mode == MODE_CLAIMED and task.type == ROTATE_CREDENTIALS:
+        if session.mode == MODE_CLAIMED and task.type in INTERNAL_TYPES:
             return self._claimed.plan(task, session.root)
         return tasks.plan(task, session.root, self._handler(session))
 
@@ -343,8 +345,11 @@ class CwmpSessionHandler:
         return self._registry.get(session.model_handler)
 
     def _finish(self, session: Session, task: Task, result: Dict[str, Any]) -> None:
-        if result.get('values'):
-            self._store.merge_parameters(session.cpe_key, result['values'])
+        values = dict(result.get('values') or {})
+        if session.mode == MODE_CLAIMED:
+            values.update(self._claimed.recorded_values(task))
+        if values:
+            self._store.merge_parameters(session.cpe_key, values)
             self._update_model(session)
         self._store.complete_task(task.task_id, result)
         session.tasks_done += 1
@@ -418,6 +423,14 @@ class CwmpSessionHandler:
 def _serial_of(inform: models.Inform) -> str:
     device_id = getattr(inform, 'DeviceId', None)
     return getattr(device_id, 'SerialNumber', None) or '?'
+
+
+def _event_codes(inform: models.Inform) -> List[str]:
+    return [
+        str(e.EventCode)
+        for e in tasks.list_items(getattr(inform, 'Event', None), 'EventStruct')
+        if e.EventCode
+    ]
 
 
 def _inform_values(inform: models.Inform) -> Dict[str, str]:

@@ -29,6 +29,15 @@ from magma.acsd.cpe_state import (
     imsi_of,
     is_online,
 )
+from magma.acsd.config import ReachConfig
+from magma.acsd.credentials import CredentialStore
+from magma.acsd.reach import (
+    BEHIND_NAT,
+    CONNECTION_REQUEST,
+    NEXT_INFORM,
+    NO_CREDENTIAL,
+    Reacher,
+)
 from magma.acsd.store import SESSION_COMPLETED, AcsStore, Session
 
 CPE = 'IMSI001010000000001'
@@ -156,9 +165,59 @@ class CpeViewsTest(unittest.TestCase):
                 'cpe_key', 'mode', 'imsi', 'serial_number', 'oui', 'product_class',
                 'software_version', 'handler', 'last_inform', 'informs_total',
                 'online', 'pending_tasks', 'last_session', 'model',
+                'reach', 'reach_reason', 'next_inform',
             ]),
         )
         self.assertEqual(value['mode'], MODE_CLAIMED)
+
+
+class CpeReachViewTest(unittest.TestCase):
+    def setUp(self):
+        self.clock = Clock()
+        self.redis = fakeredis.FakeStrictRedis()
+        self.store = AcsStore(self.redis, clock=self.clock)
+        self.creds = CredentialStore(self.redis, 'magma-acs')
+        reacher = Reacher(ReachConfig(), self.store, self.creds, self.redis)
+        self.views = CpeViews(self.store, 0, clock=self.clock, reacher=reacher)
+
+    def _claimed(self, url):
+        model = dict(MODEL, management_server={
+            'periodic_inform_interval': 300, 'connection_request_url': url,
+        })
+        self.store.count_inform(CLAIMED)
+        self.store.put_model(CLAIMED, 'titan', model)
+        self.creds.begin_rotation(CLAIMED, 16)
+        self.creds.promote(CLAIMED, 1)
+        session = Session('s1', CLAIMED, '203.0.113.7', session_key='claimed/a', mode=MODE_CLAIMED)
+        self.store.close_session(session, SESSION_COMPLETED, 'session ended')
+
+    def test_cpe_behind_a_carrier_nat_waits_for_its_next_inform(self):
+        self._claimed('http://100.64.3.4:7547/')
+        view = self.views.get(CLAIMED)
+        self.assertEqual((view.reach, view.reach_reason), (NEXT_INFORM, BEHIND_NAT))
+        self.assertEqual(view.next_inform, 10000.0 + 300)
+        self.assertEqual(view.last_session['source_ip'], '203.0.113.7')
+
+    def test_reachable_cpe(self):
+        self._claimed('http://203.0.113.7:7547/')
+        view = self.views.list()[0]
+        self.assertEqual((view.reach, view.reach_reason), (CONNECTION_REQUEST, ''))
+
+    def test_core_cpe_has_no_connection_request_credential(self):
+        self.store.count_inform(CPE)
+        self.store.put_model(CPE, 'titan', MODEL)
+        view = self.views.get(CPE)
+        self.assertEqual((view.reach, view.reach_reason), (NEXT_INFORM, NO_CREDENTIAL))
+
+    def test_without_a_reacher_reach_is_unknown(self):
+        self._claimed('http://203.0.113.7:7547/')
+        view = CpeViews(self.store, 0, clock=self.clock).get(CLAIMED)
+        self.assertEqual((view.reach, view.reach_reason), ('', ''))
+        self.assertEqual(view.next_inform, 10300.0)
+
+    def test_next_inform_falls_back_to_the_default_interval(self):
+        self.store.count_inform(CPE)
+        self.assertEqual(self.views.get(CPE).next_inform, 10000.0 + 3600)
 
 
 class MainStateWiringTest(unittest.TestCase):

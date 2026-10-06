@@ -362,6 +362,8 @@ pytest_test(
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:acsd_main",
         "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:reach",
         "//lte/gateway/python/magma/acsd:store",
         "//lte/gateway/python/magma/acsd:tasks",
         "//lte/protos:mconfigs_python_proto",
@@ -380,7 +382,10 @@ pytest_test(
     deps = [
         "//lte/gateway/python/magma/acsd:acsd_lib",
         "//lte/gateway/python/magma/acsd:acsd_main",
+        "//lte/gateway/python/magma/acsd:connreq",
         "//lte/gateway/python/magma/acsd:cpe_state",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:reach",
         "//lte/gateway/python/magma/acsd:rpc_servicer",
         "//lte/gateway/python/magma/acsd:store",
         "//lte/gateway/python/magma/acsd:tasks",
@@ -461,5 +466,41 @@ pytest_test(
         "//lte/protos:mconfigs_python_proto",
         requirement("fakeredis"),
         requirement("grpcio"),
+    ],
+)
+
+pytest_test(
+    name = "test_reach",
+    size = "small",
+    srcs = ["test_reach.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:reach",
+        "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
+    ],
+)
+
+pytest_test(
+    name = "test_connreq",
+    size = "small",
+    srcs = ["test_connreq.py"],
+    imports = [
+        LTE_ROOT,
+        ORC8R_ROOT,
+    ],
+    deps = [
+        "//lte/gateway/python/magma/acsd:acsd_lib",
+        "//lte/gateway/python/magma/acsd:connreq",
+        "//lte/gateway/python/magma/acsd:credentials",
+        "//lte/gateway/python/magma/acsd:reach",
+        "//lte/gateway/python/magma/acsd:store",
+        requirement("fakeredis"),
+        requirement("requests"),
     ],
 )

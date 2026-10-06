@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd.claimed import ClaimedMode
 from magma.acsd.claims import ClaimRegistry
+from magma.acsd.connreq import ConnectionRequester
 from magma.acsd.config import (
     AUTH_OFF,
     MODE_CLAIMED,
@@ -27,10 +28,12 @@ from magma.acsd.config import (
     CwmpAuthConfig,
     CwmpBind,
     CwmpWanConfig,
+    ReachConfig,
     get_cwmp_auth,
     get_cwmp_bind,
     get_cwmp_wan,
     get_cwmp_workers,
+    get_reach_config,
 )
 from magma.acsd.cpe_state import STATE_MAX_AGE_SEC, CpeViews
 from magma.acsd.credentials import CredentialStore
@@ -42,6 +45,7 @@ from magma.acsd.digest import (
 from magma.acsd.events import AcsEvents, EventEmitter
 from magma.acsd.identity import SessionIdentifier
 from magma.acsd.metrics import AcsMetrics, get_cpe_kpi_config
+from magma.acsd.reach import Reacher
 from magma.acsd.rpc_servicer import CpeManagerRpcServicer
 from magma.acsd.server import make_cwmp_server, make_cwmp_wsgi, make_tls_context
 from magma.acsd.session import REAP_INTERVAL_SEC, CwmpSessionHandler
@@ -99,7 +103,7 @@ def make_authenticator(auth: CwmpAuthConfig) -> Optional[DigestAuthenticator]:
 
 
 def make_claimed_mode(
-    wan: CwmpWanConfig, store: AcsStore, client,
+    wan: CwmpWanConfig, store: AcsStore, client, reach: ReachConfig = ReachConfig(),
 ) -> Optional[ClaimedMode]:
     """Claimed mode for the WAN listener, or None when it is off."""
     if not wan.enabled:
@@ -112,6 +116,7 @@ def make_claimed_mode(
     return ClaimedMode(
         ClaimRegistry(client), CredentialStore(client, wan.realm), store,
         wan.bootstrap_username, wan.bootstrap_password,
+        reach.periodic_inform_interval,
     )
 
 
@@ -195,16 +200,20 @@ def main():
     metrics = AcsMetrics(get_cpe_kpi_config(config))
     events = AcsEvents(EventEmitter().start())
     store = AcsStore(client, listener=StoreListeners(metrics, events))
-    views = CpeViews(store, service.mconfig.periodic_inform_interval)
+    auth = get_cwmp_auth(config)
+    wan = get_cwmp_wan(config, auth)
+    reach = get_reach_config(config, service.mconfig)
+    claimed = make_claimed_mode(wan, store, client, reach)
+    frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
+    reacher = Reacher(
+        reach, store, claimed.credentials if claimed else None, client, frozen,
+    )
+    views = CpeViews(store, service.mconfig.periodic_inform_interval, reacher=reacher)
     events.mode_of = views.mode_of
     # A new process cannot continue the HTTP exchanges of the last one.
     requeued = store.end_all_sessions('acsd restarted')
     if requeued:
         logging.info('Requeued %d tasks left in progress', requeued)
-    auth = get_cwmp_auth(config)
-    wan = get_cwmp_wan(config, auth)
-    claimed = make_claimed_mode(wan, store, client)
-    frozen = service.mconfig.mode == mconfigs_pb2.AcsD.FROZEN
     handler = CwmpSessionHandler(
         identify=SessionIdentifier(), store=store, claimed=claimed,
         observer=metrics, frozen=frozen,
@@ -222,7 +231,10 @@ def main():
     )
 
     service.register_operational_states_callback(views.operational_states)
-    CpeManagerRpcServicer(handler.store, views, frozen).add_to_server(service.rpc_server)
+    requester = ConnectionRequester(reacher, store, reach.connection_request_timeout_secs)
+    CpeManagerRpcServicer(
+        handler.store, views, frozen, requester,
+    ).add_to_server(service.rpc_server)
     schedule_reaper(
         service.loop, store,
         then=lambda: metrics.refresh(views.list(STATE_MAX_AGE_SEC), store.task_counts()),
