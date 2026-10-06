@@ -151,6 +151,8 @@ func titan(key, mode string, online bool) *cpestate.CpeView {
 		LastInform: float64(informAt.Unix()) + 0.5, InformsTotal: 7, Online: online, PendingTasks: 1,
 		LastSession: &cpestate.CpeSession{SessionID: "s1", Result: "completed", Started: 1700000000, Ended: 1700000001, TasksDone: 2},
 		Model:       map[string]interface{}{"identity": map[string]interface{}{"model_name": "Titan 4000"}},
+		Reach:       cpestate.ReachConnectionRequest,
+		NextInform:  float64(informAt.Unix()) + 300.5,
 	}
 }
 
@@ -184,6 +186,7 @@ func TestListCpes(t *testing.T) {
 	assert.Equal(t, int32(2), got.LastSession.TasksDone)
 	assert.WithinDuration(t, time.Now(), time.Time(got.ReportedAt), time.Minute)
 	assert.Nil(t, all[0].LastInform, "never-set times are absent")
+	assert.Nil(t, all[0].NextInform)
 
 	assert.Equal(t, []string{"IMSI001010000000001", "IMSI001010000000002"}, keys(listCpes(t, h, "?model=Titan+4000")))
 	assert.Equal(t, []string{"CLAIM7"}, keys(listCpes(t, h, "?model=5G16-A")))
@@ -247,6 +250,10 @@ func TestGetCpe(t *testing.T) {
 	assert.Equal(t, "IMSI001010000000001", detail.Cpe.CpeKey)
 	assert.Equal(t, "g2", detail.Cpe.GatewayID)
 	assert.Equal(t, map[string]interface{}{"identity": map[string]interface{}{"model_name": "Titan 4000"}}, detail.Model)
+	assert.Equal(t, cpestate.ReachConnectionRequest, detail.Cpe.Reach)
+	assert.Empty(t, detail.Cpe.ReachReason)
+	require.NotNil(t, detail.Cpe.NextInform)
+	assert.Equal(t, informAt.Add(300*time.Second+500*time.Millisecond).UTC(), time.Time(*detail.Cpe.NextInform))
 
 	rec = serve(t, h, http.MethodGet, CpePath, "/magma/v1/acs/n1/cpes/IMSI9",
 		map[string]string{"network_id": "n1", "cpe_key": "IMSI9"}, "")
