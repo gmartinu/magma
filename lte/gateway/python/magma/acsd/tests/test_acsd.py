@@ -90,6 +90,22 @@ class ReachConfigTest(unittest.TestCase):
         cfg = {'cwmp_reach': {'periodic_inform_interval': 0}}
         self.assertEqual(get_reach_config(cfg, mconfigs_pb2.AcsD()).periodic_inform_interval, 0)
 
+    def test_connection_request_modes(self):
+        self.assertEqual(get_reach_config({}, mconfigs_pb2.AcsD()).connection_request, 'auto')
+        for raw, mode in (('always', 'always'), ('OFF', 'off'), (False, 'off')):
+            cfg = {'cwmp_reach': {'connection_request': raw}}
+            self.assertEqual(get_reach_config(cfg, mconfigs_pb2.AcsD()).connection_request, mode)
+        with self.assertRaises(ValueError):
+            get_reach_config({'cwmp_reach': {'connection_request': 'sometimes'}}, mconfigs_pb2.AcsD())
+
+    def test_connection_request_timeout(self):
+        reach = get_reach_config({}, mconfigs_pb2.AcsD())
+        self.assertEqual(reach.connection_request_timeout_secs, 5.0)
+        cfg = {'cwmp_reach': {'connection_request_timeout_secs': 0.01}}
+        self.assertEqual(
+            get_reach_config(cfg, mconfigs_pb2.AcsD()).connection_request_timeout_secs, 0.5,
+        )
+
     def test_mconfig_wins_when_set(self):
         cfg = {'cwmp_reach': {'periodic_inform_interval': 120}}
         reach = get_reach_config(cfg, mconfigs_pb2.AcsD(periodic_inform_interval=60))

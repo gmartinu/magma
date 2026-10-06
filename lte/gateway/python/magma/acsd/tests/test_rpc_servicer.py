@@ -23,7 +23,10 @@ from lte.protos.cpe_acs_pb2_grpc import CpeManagerStub
 from lte.protos.mconfig import mconfigs_pb2
 from magma.acsd import main, tasks
 from magma.acsd.config import MODE_CLAIMED, MODE_CORE
+from magma.acsd.config import ReachConfig
 from magma.acsd.cpe_state import CpeViews
+from magma.acsd.credentials import CredentialStore
+from magma.acsd.reach import Reacher
 from magma.acsd.rpc_servicer import (
     CONNECTION_REQUEST_UNIMPLEMENTED,
     CpeManagerRpcServicer,
@@ -218,6 +221,48 @@ class CpeManagerTest(unittest.TestCase):
             pb.ConnectionRequestRequest(cpe_key=CPE),
         )
         self.assertEqual(details, CONNECTION_REQUEST_UNIMPLEMENTED)
+
+
+class CpeReachRpcTest(unittest.TestCase):
+    def setUp(self):
+        self.clock = Clock()
+        redis = fakeredis.FakeStrictRedis()
+        self.store = AcsStore(redis, clock=self.clock)
+        self.creds = CredentialStore(redis, 'magma-acs')
+        reacher = Reacher(ReachConfig(), self.store, self.creds, redis)
+        views = CpeViews(self.store, 0, clock=self.clock, reacher=reacher)
+        self.servicer = CpeManagerRpcServicer(self.store, views)
+        self.store.count_inform(CLAIMED)
+        self.store.put_model(CLAIMED, 'titan', dict(MODEL, management_server={
+            'periodic_inform_interval': 120,
+            'connection_request_url': 'http://100.64.3.4:7547/',
+        }))
+        self.creds.begin_rotation(CLAIMED, 16)
+        self.creds.promote(CLAIMED, 1)
+        session = Session('s1', CLAIMED, '203.0.113.7', session_key='claimed/a', mode=MODE_CLAIMED)
+        self.store.close_session(session, SESSION_COMPLETED, 'session ended')
+
+    def test_cpe_and_its_pending_tasks_say_they_wait_for_the_next_inform(self):
+        task = self.servicer.EnqueueTask(
+            pb.EnqueueTaskRequest(cpe_key=CLAIMED, type=pb.CPE_TASK_TYPE_REBOOT), None,
+        )
+        self.assertEqual((task.reach, task.next_inform), (pb.CPE_REACH_NEXT_INFORM, 10120.0))
+        cpe = self.servicer.GetCpe(pb.GetCpeRequest(cpe_key=CLAIMED), None)
+        self.assertEqual(
+            (cpe.reach, cpe.reach_reason, cpe.next_inform),
+            (pb.CPE_REACH_NEXT_INFORM, 'behind_nat', 10120.0),
+        )
+        self.assertEqual(cpe.tasks[0].reach, pb.CPE_REACH_NEXT_INFORM)
+        listed = self.servicer.ListCpes(pb.ListCpesRequest(), None).cpes[0]
+        self.assertEqual(listed.reach_reason, 'behind_nat')
+        # The NAT address stays out of the API.
+        self.assertEqual(cpe.last_session.session_id, 's1')
+
+    def test_finished_tasks_carry_no_reach(self):
+        task = tasks.enqueue_task(self.store, CLAIMED, tasks.REBOOT)
+        self.store.complete_task(task.task_id, {})
+        got = self.servicer.GetTask(pb.GetTaskRequest(task_id=task.task_id), None)
+        self.assertEqual((got.reach, got.next_inform), (pb.CPE_REACH_UNSPECIFIED, 0.0))
 
 
 class MainServesCpeManagerTest(unittest.TestCase):
