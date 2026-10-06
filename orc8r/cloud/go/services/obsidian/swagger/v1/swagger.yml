@@ -80,7 +80,7 @@ paths:
   /acs/{network_id}/cpes:
     get:
       description: |
-        Read from the cpe_acs state each AGW reports, so CPEs of an AGW that is offline still appear, with online false once the report is stale.
+        Read from the cpe_acs state each AGW reports, so CPEs of an AGW that is offline still appear, with online false once the report is stale. When several AGWs report one cpe_key, the one with the newest Inform serves it. CPEs silent longer than the stale horizon (7 days by default) are left out unless include_stale is true.
       parameters:
       - $ref: '#/parameters/network_id'
       - description: Only CPEs whose model_name or product_class is exactly this
@@ -106,6 +106,11 @@ paths:
         name: mode
         required: false
         type: string
+      - description: Also list CPEs whose last Inform is past the stale horizon
+        in: query
+        name: include_stale
+        required: false
+        type: boolean
       responses:
         "200":
           description: CPEs of the network, ordered by cpe_key
@@ -132,6 +137,23 @@ paths:
         default:
           $ref: '#/responses/UnexpectedError'
       summary: Get a CPE with its normalized model
+      tags:
+      - ACS
+  /acs/{network_id}/cpes/{cpe_key}/connection_request:
+    post:
+      description: |
+        Relayed to acsd on the AGW serving the CPE, which sends a TR-069 Connection Request when the CPE's reach allows it (see reach on the CPE); otherwise the CPE's queued tasks wait for its next Inform. 404 for a CPE no AGW reports, 409 when acsd is frozen, 503 when the AGW is unreachable.
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/acs_cpe_key'
+      responses:
+        "200":
+          description: What acsd did
+          schema:
+            $ref: '#/definitions/acs_connection_request'
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Ask the CPE to open a CWMP session now
       tags:
       - ACS
   /acs/{network_id}/cpes/{cpe_key}/parameters:
@@ -177,7 +199,7 @@ paths:
       - ACS
     post:
       description: |
-        Relayed to acsd on the AGW that last reported the CPE. 400 for a malformed task, 404 for a CPE no AGW reports, 503 when the AGW is unreachable.
+        Relayed to acsd on the AGW serving the CPE. 400 for a malformed task, 404 for a CPE no AGW reports, 409 when acsd is frozen (the acs entitlement expired), 503 when the AGW is unreachable.
       parameters:
       - $ref: '#/parameters/network_id'
       - $ref: '#/parameters/acs_cpe_key'
@@ -6728,16 +6750,45 @@ definitions:
       radius_config:
         $ref: '#/definitions/radius_config'
     type: object
+  acs_connection_request:
+    description: What acsd did with a Connection Request
+    properties:
+      detail:
+        description: Why it failed, the HTTP status or the error
+        type: string
+      next_inform:
+        format: date-time
+        type: string
+        x-nullable: true
+      reach:
+        description: |
+          next_inform when not sent, or connection_request with reason in_session when the CPE has a session open
+        type: string
+      reason:
+        type: string
+      sent:
+        description: The CPE accepted it and should open a session now
+        type: boolean
+        x-nullable: false
+    required:
+    - sent
+    type: object
   acs_cpe:
     description: A TR-069 CPE as last reported by its AGW
     properties:
+      conflicting_gateway_ids:
+        description: |
+          Other gateways that report this cpe_key online too: a claim ID used on two AGWs, or a CPE that just moved to gateway_id
+        items:
+          type: string
+        type: array
       cpe_key:
         example: IMSI001010000000001
         minLength: 1
         type: string
         x-nullable: false
       gateway_id:
-        description: Gateway whose acsd last reported the CPE; empty if unregistered
+        description: Gateway serving the CPE (the newest Inform); empty if unregistered
         type: string
         x-nullable: false
       handler:
@@ -6769,6 +6820,11 @@ definitions:
       model_name:
         description: ModelName the CPE reported, from the normalized model
         type: string
+      next_inform:
+        description: When the next periodic Inform is due; in the past when the CPE is late, absent before its first Inform
+        format: date-time
+        type: string
+        x-nullable: true
       online:
         description: |
           Whether the last Inform is at most two periodic inform intervals old, as acsd computed it; false when the AGW report is stale
@@ -6782,6 +6838,14 @@ definitions:
         type: integer
       product_class:
         example: Titan4000
+        type: string
+      reach:
+        description: |
+          How queued tasks get to the CPE: connection_request (acsd asks the CPE to open a session, the tasks run within seconds) or next_inform (they wait for next_inform); empty when acsd does not say
+        type: string
+      reach_reason:
+        description: |
+          Why reach is next_inform: behind_nat, no_url, no_credential, disabled, connection_request_failed or frozen
         type: string
       reported_at:
         description: When the AGW last reported the CPE's state
