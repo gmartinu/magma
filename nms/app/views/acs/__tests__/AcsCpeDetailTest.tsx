@@ -58,7 +58,7 @@ describe('AcsCpeDetail', () => {
     expect(range).toHaveBeenCalledWith(
       expect.objectContaining({
         networkId: 'net1',
-        query: 'acs_rsrp_dbm{cpe_key="IMSI001010000000113"}',
+        query: 'max by (cpe_key) (acs_rsrp_dbm{cpe_key="IMSI001010000000113"})',
       }),
     );
   });

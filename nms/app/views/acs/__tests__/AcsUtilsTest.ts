@@ -33,6 +33,7 @@ import {
 } from '../AcsUtils';
 import {
   byLabel,
+  cpeKpiQuery,
   cpeSelector,
   latestSignal,
   stepFor,
@@ -119,6 +120,9 @@ describe('AcsMetrics', () => {
     expect(cpeSelector('acs_rsrp_dbm', 'IMSI1')).toBe(
       'acs_rsrp_dbm{cpe_key="IMSI1"}',
     );
+    expect(cpeKpiQuery('acs_sinr_db', 'IMSI1')).toBe(
+      'max by (cpe_key) (acs_sinr_db{cpe_key="IMSI1"})',
+    );
     expect(cpeSelector('acs_rsrp_dbm', 'a"b\\c')).toBe(
       'acs_rsrp_dbm{cpe_key="a\\"b\\\\c"}',
     );
@@ -168,7 +172,12 @@ describe('AcsMetrics', () => {
               result: [
                 {
                   metric: {cpe_key: 'IMSI1'} as never,
-                  value: ['1', query === 'acs_rsrp_dbm' ? '-84' : '14.5'],
+                  value: [
+                    '1',
+                    query === 'max by (cpe_key) (acs_rsrp_dbm)'
+                      ? '-84'
+                      : '14.5',
+                  ],
                 },
               ],
             },
