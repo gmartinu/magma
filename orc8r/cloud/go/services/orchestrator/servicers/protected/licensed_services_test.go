@@ -47,9 +47,10 @@ func TestFilterLicensedServices(t *testing.T) {
 		"active":       {entitlements.Decision{Enforced: true, State: entitlements.StateActive}, nil, services},
 		"grace":        {entitlements.Decision{Enforced: true, State: entitlements.StateGrace}, nil, services},
 		// Frozen acsd keeps running, read-only.
-		"frozen":         {entitlements.Decision{Enforced: true, State: entitlements.StateFrozen}, nil, services},
-		"not entitled":   {entitlements.Decision{Enforced: true, State: entitlements.StateDisabled}, nil, []string{"monitord", "td-agent-bit"}},
-		"lookup failure": {entitlements.Decision{}, errors.New("down"), services},
+		"frozen":       {entitlements.Decision{Enforced: true, State: entitlements.StateFrozen}, nil, services},
+		"not entitled": {entitlements.Decision{Enforced: true, State: entitlements.StateDisabled}, nil, []string{"monitord", "td-agent-bit"}},
+		// No decision known: acsd stays, frozen by its own mconfig.
+		"no decision known": {entitlements.Decision{}, errors.New("down"), services},
 	} {
 		calls := 0
 		restore := servicers.StubFeatureDecision(func(_ context.Context, networkID, feature string) (entitlements.Decision, error) {

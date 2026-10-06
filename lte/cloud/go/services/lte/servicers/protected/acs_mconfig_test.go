@@ -84,12 +84,13 @@ func TestAcsdMconfigFollowsEntitlement(t *testing.T) {
 		err  error
 		want lte_mconfig.AcsD_Mode
 	}{
-		"not enforced":   {notEnforced, nil, lte_mconfig.AcsD_ACTIVE},
-		"active":         {active, nil, lte_mconfig.AcsD_ACTIVE},
-		"grace":          {grace, nil, lte_mconfig.AcsD_ACTIVE},
-		"past grace":     {frozen, nil, lte_mconfig.AcsD_FROZEN},
-		"not entitled":   {disabled, nil, lte_mconfig.AcsD_ACTIVE},
-		"lookup failure": {entitlements.Decision{}, errors.New("down"), lte_mconfig.AcsD_ACTIVE},
+		"not enforced": {notEnforced, nil, lte_mconfig.AcsD_ACTIVE},
+		"active":       {active, nil, lte_mconfig.AcsD_ACTIVE},
+		"grace":        {grace, nil, lte_mconfig.AcsD_ACTIVE},
+		"past grace":   {frozen, nil, lte_mconfig.AcsD_FROZEN},
+		"not entitled": {disabled, nil, lte_mconfig.AcsD_ACTIVE},
+		// ForNetwork errs only when no decision is known at all.
+		"no decision known": {entitlements.Decision{}, errors.New("down"), lte_mconfig.AcsD_FROZEN},
 		"frozen, not enforced": {
 			entitlements.Decision{State: entitlements.StateFrozen}, nil, lte_mconfig.AcsD_ACTIVE,
 		},
