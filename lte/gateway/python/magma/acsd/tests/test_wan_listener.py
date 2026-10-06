@@ -228,6 +228,27 @@ class WanListenerTest(unittest.TestCase):
         self.assertIn(b'InformResponse', body)
         conn.close()
 
+    def test_session_cookie_survives_a_reconnect(self):
+        cpe = DigestCpe(BOOT_USER, BOOT_PASSWORD)
+        conn, resp, _ = self._open_session(cpe)
+        self.assertEqual(resp.status, 200)
+        cookie = resp.getheader('Set-Cookie').split(';')[0]
+        self.assertIn('Secure', resp.getheader('Set-Cookie'))
+        conn.close()
+        conn = self._https()
+        headers = dict(XML, Cookie=cookie)
+        conn.request('POST', '/', b'', headers)
+        resp = conn.getresponse()
+        resp.read()
+        self.assertEqual(resp.status, 401)
+        cpe.take(resp.getheader('WWW-Authenticate'))
+        conn.request('POST', '/', b'', dict(headers, Authorization=cpe.header()))
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200)
+        self.assertIn(b'SetParameterValues', body)
+
     def test_wrong_password_never_reaches_the_session(self):
         conn, resp, _ = self._open_session(DigestCpe(BOOT_USER, 'nope'))
         self.assertEqual(resp.status, 401)
@@ -262,6 +283,20 @@ class WanListenerTest(unittest.TestCase):
         listen.assert_not_called()
 
 
+class ClaimedModeForgetTest(unittest.TestCase):
+    def test_removing_a_claim_forgets_through_the_live_store(self):
+        redis = fakeredis.FakeStrictRedis()
+        store = AcsStore(redis)
+        mode = main.make_claimed_mode(CwmpWanConfig(enabled=True), store, redis)
+        mode.claims.add('00A1B2', 'P', 'SN1', claim_id='t1')
+        store.create_task('CLAIMt1', 'reboot')
+        cred, _ = mode.credentials.begin_rotation('CLAIMt1', 16)
+        mode.credentials.promote('CLAIMt1', cred.pending_generation)
+        mode.claims.remove('t1')
+        self.assertEqual(store.list_tasks('CLAIMt1'), [])
+        self.assertFalse(mode.credentials.get('CLAIMt1').rotated)
+
+
 class MainWanWiringTest(unittest.TestCase):
     def _run_main(self, config):
         service = mock.Mock(mconfig=mconfigs_pb2.AcsD())
@@ -292,6 +327,15 @@ class MainWanWiringTest(unittest.TestCase):
         self.assertIs(handler._claimed, claimed)
         self.assertIs(cwmp, listen.call_args.kwargs['cwmp'])
         self.assertEqual(claimed.lookup('b', '192.0.2.1'), 'bp')
+
+    def test_body_limit_reaches_both_listeners(self):
+        listen, wan_listen = self._run_main({
+            'cwmp_auth': {'username': 'b', 'password': 'bp'},
+            'cwmp_wan': {'enabled': True},
+            'cwmp_max_body_bytes': 2048,
+        })
+        self.assertEqual(listen.call_args.kwargs['max_body'], 2048)
+        self.assertEqual(wan_listen.call_args.kwargs['max_body'], 2048)
 
 
 if __name__ == '__main__':

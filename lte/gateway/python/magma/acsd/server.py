@@ -16,16 +16,19 @@ import logging
 import ssl
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from typing import Callable, Iterable, List, Optional
 from wsgiref.simple_server import WSGIServer
 
 from magma.acsd.config import (
+    DEFAULT_CWMP_MAX_BODY_BYTES,
     DEFAULT_CWMP_WORKERS,
     LISTENER_MODE,
     MODE_CORE,
     CwmpBind,
 )
 from magma.acsd.digest import (
+    CLOSE_CONNECTION,
     CONNECTION_STATE,
     DigestAuthenticator,
     DigestAuthMiddleware,
@@ -52,14 +55,37 @@ class CwmpWsgiApp:
     Wraps the spyne CWMP application so it can be served from many threads.
 
     spyne's TR-069 dispatch writes the reply name onto the shared method
-    descriptor (`sub_name`), so two requests in flight at once could swap
-    replies. The request body is read before taking the lock, so a slow CPE
-    upload never blocks the others; only the in-memory SOAP work is serial.
+    descriptor (`sub_name`) after the handler returns, and serialization
+    reads it back, so two requests in flight at once could swap replies.
+    spyne's parse, the sub_name write and serialization therefore run under
+    one lock. The session handler, where the time goes (the mobilityd RPC
+    of the identity, Redis), runs with the lock released (unlocked()): it
+    is called before its request writes sub_name, and the lock is taken
+    back before spyne does. The request body is read before the lock too,
+    so a slow CPE upload never blocks the others.
     """
 
     def __init__(self, spyne_app: WsgiApp):
         self._spyne_app = spyne_app
         self._lock = threading.Lock()
+        self._held = threading.local()
+
+    @contextmanager
+    def unlocked(self):
+        """
+        Release the spyne lock for the block if this thread holds it, so
+        other CPEs' requests go through spyne meanwhile.
+        """
+        if not getattr(self._held, 'value', False):
+            yield
+            return
+        self._held.value = False
+        self._lock.release()
+        try:
+            yield
+        finally:
+            self._lock.acquire()
+            self._held.value = True
 
     def __call__(self, environ: dict, start_response: Callable) -> List[bytes]:
         if environ.get('REQUEST_METHOD', '').upper() != 'POST':
@@ -80,7 +106,11 @@ class CwmpWsgiApp:
             reply['status'], reply['headers'] = status, headers
 
         with self._lock:
-            chunks = b''.join(self._spyne_app(environ, capture))
+            self._held.value = True
+            try:
+                chunks = b''.join(self._spyne_app(environ, capture))
+            finally:
+                self._held.value = False
 
         status, headers = reply['status'], reply['headers']
         if status.startswith('200') and not chunks:
@@ -92,6 +122,17 @@ class CwmpWsgiApp:
         ] + [('Content-Length', str(len(chunks)))]
         start_response(status, headers)
         return [chunks]
+
+
+class _UnlockedHandler:
+    """The session handler, called with the spyne lock released."""
+
+    def __init__(self, handler: Tr069MessageHandler, cwmp: CwmpWsgiApp):
+        self._handler, self._cwmp = handler, cwmp
+
+    def handle_tr069_message(self, ctx, message):
+        with self._cwmp.unlocked():
+            return self._handler.handle_tr069_message(ctx, message)
 
 
 def _echo_cwmp_id(ctx) -> None:
@@ -109,9 +150,9 @@ def make_cwmp_wsgi(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     """
     The CWMP WSGI app with `handler` owning every CPE message. The spyne
     service and its handler are process-wide (class attributes), so every
-    listener must share this one app and its lock.
+    listener must share this one app and its lock. `handler` is called
+    from many threads at once, so it must be thread-safe.
     """
-    AutoConfigServer.set_state_machine_manager(handler)
     app = Tr069Application(
         [AutoConfigServer], CWMP_NS,
         in_protocol=Tr069Soap11(validator='soft'),
@@ -119,7 +160,9 @@ def make_cwmp_wsgi(handler: Tr069MessageHandler) -> CwmpWsgiApp:
     )
     # App-level listener: fires after the RPC body, before serialization.
     app.event_manager.add_listener('method_return_object', _echo_cwmp_id)
-    return CwmpWsgiApp(WsgiApplication(app))
+    cwmp = CwmpWsgiApp(WsgiApplication(app))
+    AutoConfigServer.set_state_machine_manager(_UnlockedHandler(handler, cwmp))
+    return cwmp
 
 
 def make_cwmp_app(
@@ -127,16 +170,47 @@ def make_cwmp_app(
     authenticator: Optional[DigestAuthenticator] = None,
     mode: str = MODE_CORE,
     cwmp: Optional[CwmpWsgiApp] = None,
+    max_body: int = DEFAULT_CWMP_MAX_BODY_BYTES,
 ) -> WsgiApp:
     """
     The app of one listener: the shared `cwmp` app (built for `handler`
     when not given) behind Digest when `authenticator` is given, with every
-    request tagged with the listener's identity mode.
+    request tagged with the listener's identity mode. Bodies over
+    `max_body` bytes are refused before anything reads them.
     """
     app: WsgiApp = cwmp or make_cwmp_wsgi(handler)
     if authenticator is not None:
         app = DigestAuthMiddleware(app, authenticator)
-    return _ModeTag(app, mode)
+    return _BodyLimit(_ModeTag(app, mode), max_body)
+
+
+class _BodyLimit:
+    """
+    Refuse a request whose declared body is too large (413) or unreadable
+    (400) and close the connection, so the body is never read into memory.
+    """
+
+    def __init__(self, app: WsgiApp, max_body: int):
+        self._app, self._max = app, max_body
+
+    def __call__(self, environ: dict, start_response: Callable):
+        try:
+            length = int(environ.get('CONTENT_LENGTH') or 0)
+        except ValueError:
+            length = -1
+        if 0 <= length <= self._max:
+            return self._app(environ, start_response)
+        status = '413 Payload Too Large' if length > self._max else '400 Bad Request'
+        logging.warning(
+            'Refusing CWMP request from %s: %s (Content-Length %r, limit %d)',
+            environ.get('REMOTE_ADDR', ''), status,
+            environ.get('CONTENT_LENGTH'), self._max,
+        )
+        conn = environ.get(CONNECTION_STATE)
+        if conn is not None:
+            conn[CLOSE_CONNECTION] = True
+        start_response(status, [('Content-Length', '0')])
+        return [b'']
 
 
 class _ModeTag:
@@ -214,6 +288,13 @@ class CwmpRequestHandler(tr069_WSGIRequestHandler):
         self.connection_state = {}  # pylint: disable=attribute-defined-outside-init
         super().handle()
 
+    def handle_single(self):
+        super().handle_single()
+        if self.connection_state.get(CLOSE_CONNECTION):
+            # The body of the request was left unread, so nothing after it
+            # on this connection can be parsed.
+            self.close_connection = 1
+
     def get_environ(self):
         environ = super().get_environ()
         environ[CONNECTION_STATE] = self.connection_state
@@ -232,6 +313,7 @@ def make_cwmp_server(
     mode: str = MODE_CORE,
     ssl_context: Optional[ssl.SSLContext] = None,
     cwmp: Optional[CwmpWsgiApp] = None,
+    max_body: int = DEFAULT_CWMP_MAX_BODY_BYTES,
 ) -> PooledWSGIServer:
     """
     Create (but do not start) a CWMP listener on `bind`, serving HTTPS
@@ -241,7 +323,7 @@ def make_cwmp_server(
     server = PooledWSGIServer(
         (bind.address, bind.port), CwmpRequestHandler, workers, ssl_context,
     )
-    server.set_app(make_cwmp_app(handler, authenticator, mode, cwmp))
+    server.set_app(make_cwmp_app(handler, authenticator, mode, cwmp, max_body))
     return server
 
 

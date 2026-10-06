@@ -61,3 +61,20 @@ definitions:
         description: 0 when the task failed because its sessions kept dropping
       fault_string:
         type: string
+  cpe_bootstrap_refused:
+    type: object
+    description: >-
+      A claimed CPE that has its own credential logged in with the shared
+      bootstrap one and was refused: a factory reset in the field, or another
+      device presenting its serial. acsd_cli.py reset-credentials or
+      allow-rebootstrap lets it in again.
+    properties:
+      cpe_key:
+        type: string
+        description: The claim key of the CPE the Inform DeviceId names
+      serial:
+        type: string
+        description: DeviceId.SerialNumber of the refused Inform
+      source_ip:
+        type: string
+        description: Where the login came from (usually a carrier NAT)

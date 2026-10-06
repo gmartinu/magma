@@ -20,6 +20,9 @@ DEFAULT_CWMP_INTERFACE = 'mtr0'
 DEFAULT_CWMP_ADDRESS = '10.1.0.1'
 DEFAULT_CWMP_PORT = 48081
 DEFAULT_CWMP_WORKERS = 16
+# The largest Inform or GetParameterValuesResponse acsd accepts; a full
+# TR-181 dump of a CPE is a few hundred KiB.
+DEFAULT_CWMP_MAX_BODY_BYTES = 1024 * 1024
 
 # Identity modes of a CWMP listener: `core` names the CPE by the IMSI
 # behind its source IP on mtr0; `claimed` by its claim and per-CPE Digest.
@@ -64,6 +67,13 @@ def get_cwmp_bind(
 def get_cwmp_workers(service_config: Dict[str, Any]) -> int:
     """Size of the CWMP worker pool: CPE connections served at once."""
     return max(1, int(service_config.get('cwmp_workers', DEFAULT_CWMP_WORKERS)))
+
+
+def get_cwmp_max_body(service_config: Dict[str, Any]) -> int:
+    """The largest CWMP request body accepted; larger ones get 413."""
+    return max(
+        1, int(service_config.get('cwmp_max_body_bytes') or DEFAULT_CWMP_MAX_BODY_BYTES),
+    )
 
 
 @dataclass(frozen=True)

@@ -26,8 +26,8 @@ from magma.acsd.claims import ClaimRegistry
 from magma.acsd.config import LISTENER_MODE, MODE_CLAIMED
 from magma.acsd.credentials import CredentialStore
 from magma.acsd.datamodel import GENERIC, Quirks, Registry
-from magma.acsd.digest import DIGEST_USERNAME, ha1_of
-from magma.acsd.session import HTTP_403, CwmpSessionHandler
+from magma.acsd.digest import CONNECTION_STATE, DIGEST_USERNAME, ha1_of
+from magma.acsd.session import HTTP_403, SESSION_COOKIE, CwmpSessionHandler
 from magma.acsd.store import TASK_DONE, TASK_FAILED, TASK_PENDING, AcsStore
 from magma.tr069 import models
 
@@ -381,6 +381,144 @@ class PeriodicInformTest(unittest.TestCase):
         )
         self.send(_inform(events=('0 BOOTSTRAP',)))
         self.assertEqual(self.store.list_tasks(KEY), [])
+
+
+
+
+class BootstrapRefusedTest(unittest.TestCase):
+    """A rotated CPE logging in with the bootstrap credential."""
+
+    def setUp(self):
+        self.redis = fakeredis.FakeStrictRedis()
+        self.store = AcsStore(self.redis)
+        self.claims = ClaimRegistry(self.redis)
+        self.claims.add(OUI, PRODUCT, SERIAL, claim_id='titan-1')
+        self.now = 1000.0
+        self.creds = CredentialStore(self.redis, REALM, clock=lambda: self.now)
+        self.refused = []
+        observer = SimpleNamespace(
+            bootstrap_refused=lambda *args: self.refused.append(args),
+        )
+        self.mode = ClaimedMode(
+            self.claims, self.creds, self.store, BOOT_USER, BOOT_PASSWORD,
+            observers=[observer],
+        )
+        cred, _ = self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, cred.pending_generation)
+        self.old_user = cred.pending_username
+
+    def identify(self, username=BOOT_USER):
+        return self.mode.identify(NAT_IP, _inform(), username)
+
+    def test_refusal_is_reported(self):
+        self.assertIsNone(self.identify())
+        self.assertEqual(self.refused, [(KEY, SERIAL, NAT_IP)])
+        self.assertTrue(self.creds.get(KEY).rotated)
+
+    def test_approval_lets_it_bootstrap_once(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.assertEqual(self.identify(), KEY)
+        self.assertEqual(self.refused, [])
+        # The old credential is gone and the CPE rotates as a new one.
+        self.assertFalse(self.creds.get(KEY).rotated)
+        self.assertIsNone(self.creds.owner(self.old_user))
+        self.assertEqual(self.creds.rebootstrap_approval(KEY), 0.0)
+        # Used up: once rotated again, the bootstrap credential is refused.
+        cred, _ = self.creds.begin_rotation(KEY, 16)
+        self.creds.promote(KEY, cred.pending_generation)
+        self.assertIsNone(self.identify())
+        self.assertEqual(len(self.refused), 1)
+
+    def test_expired_approval_is_refused(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.now += 601
+        self.assertIsNone(self.identify())
+        self.assertEqual(len(self.refused), 1)
+        self.assertTrue(self.creds.get(KEY).rotated)
+
+    def test_reset_drops_the_approval(self):
+        self.creds.allow_rebootstrap(KEY, 600)
+        self.creds.reset(KEY)
+        self.assertEqual(self.creds.rebootstrap_approval(KEY), 0.0)
+
+    def test_per_cpe_login_is_not_reported(self):
+        self.assertEqual(self.identify(self.old_user), KEY)
+        self.assertEqual(self.refused, [])
+
+
+class SessionCookieTest(unittest.TestCase):
+    """Claimed sessions survive a reconnect through the InformResponse cookie."""
+
+    def setUp(self):
+        self.redis = fakeredis.FakeStrictRedis()
+        self.store = AcsStore(self.redis)
+        self.claims = ClaimRegistry(self.redis)
+        self.claims.add(OUI, PRODUCT, SERIAL, claim_id='titan-1')
+        self.claims.add(OUI, PRODUCT, 'SN0002', claim_id='titan-2')
+        self.creds = CredentialStore(self.redis, REALM)
+        self.mode = ClaimedMode(self.claims, self.creds, self.store, BOOT_USER, BOOT_PASSWORD)
+        self.handler = CwmpSessionHandler(store=self.store, claimed=self.mode)
+
+    def send(self, message, port, cookie=None, username=BOOT_USER, conn=None):
+        env = {
+            'REMOTE_ADDR': NAT_IP, 'REMOTE_PORT': str(port),
+            LISTENER_MODE: MODE_CLAIMED, DIGEST_USERNAME: username,
+            'wsgi.url_scheme': 'https',
+        }
+        if cookie:
+            env['HTTP_COOKIE'] = 'other=1; %s=%s' % (SESSION_COOKIE, cookie)
+        if conn is not None:
+            env[CONNECTION_STATE] = conn
+        ctx = SimpleNamespace(
+            transport=SimpleNamespace(req_env=env, resp_code=None, resp_headers={}),
+        )
+        return self.handler.handle_tr069_message(ctx, message), ctx
+
+    def inform(self, port=40000, serial=SERIAL, conn=None):
+        resp, ctx = self.send(_inform(serial=serial), port, conn=conn)
+        self.assertIsInstance(resp, models.InformResponse)
+        header = ctx.transport.resp_headers['Set-Cookie']
+        self.assertIn('Path=/', header)
+        self.assertIn('Secure', header)
+        return header.split(';')[0].split('=', 1)[1]
+
+    def test_reconnect_mid_session_continues_the_task(self):
+        cookie = self.inform(port=40000)
+        spv, _ = self.send(models.DummyInput(), 40001, cookie)
+        self.assertIsInstance(spv, models.SetParameterValues)
+        # The CPE drops the connection and answers on a new one.
+        end, _ = self.send(models.SetParameterValuesResponse(Status=0), 40002, cookie)
+        self.assertIsInstance(end, models.DummyInput)
+        [task] = self.store.list_tasks(KEY)
+        self.assertEqual((task.type, task.status, task.attempts), (ROTATE_CREDENTIALS, TASK_DONE, 1))
+        self.assertTrue(self.creds.get(KEY).rotated)
+
+    def test_each_session_gets_a_new_cookie(self):
+        self.assertNotEqual(self.inform(), self.inform())
+
+    def test_cookie_of_another_cpe_is_ignored(self):
+        cookie = self.inform(port=40000)
+        cred, _ = self.creds.begin_rotation('CLAIMtitan-2', 16)
+        self.creds.promote('CLAIMtitan-2', cred.pending_generation)
+        resp, _ = self.send(models.DummyInput(), 40001, cookie, username=cred.username)
+        self.assertIsInstance(resp, models.DummyInput)
+        # Titan 1's session is still there for Titan 1.
+        spv, _ = self.send(models.DummyInput(), 40002, cookie)
+        self.assertIsInstance(spv, models.SetParameterValues)
+
+    def test_cpe_ignoring_cookies_keeps_its_connection(self):
+        conn = {}
+        self.inform(port=40000, conn=conn)
+        spv, _ = self.send(models.DummyInput(), 40000, conn=conn)
+        self.assertIsInstance(spv, models.SetParameterValues)
+        # A new connection without the cookie is a new, unknown session.
+        resp, _ = self.send(models.DummyInput(), 40001, conn={})
+        self.assertIsInstance(resp, models.DummyInput)
+
+    def test_malformed_cookie_is_ignored(self):
+        self.inform(port=40000)
+        resp, _ = self.send(models.DummyInput(), 40001, cookie='x";bad')
+        self.assertIsInstance(resp, models.DummyInput)
 
 
 if __name__ == '__main__':

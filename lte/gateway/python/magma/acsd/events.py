@@ -13,7 +13,9 @@ limitations under the License.
 
 """
 eventd events of acsd: `cpe_session_completed` when a CWMP session ends
-(whatever the result) and `cpe_task_failed` when a task fails for good.
+(whatever the result), `cpe_task_failed` when a task fails for good and
+`cpe_bootstrap_refused` when a claimed CPE that has its own credential
+logs in with the bootstrap one.
 Schemas: lte/swagger/cpe_acs_events.v1.yml.
 """
 
@@ -33,6 +35,7 @@ from prometheus_client import Counter
 STREAM_NAME = 'acsd'
 CPE_SESSION_COMPLETED = 'cpe_session_completed'
 CPE_TASK_FAILED = 'cpe_task_failed'
+CPE_BOOTSTRAP_REFUSED = 'cpe_bootstrap_refused'
 MAX_QUEUED_EVENTS = 1000
 
 EVENTS_DROPPED = Counter(
@@ -128,4 +131,11 @@ class AcsEvents(StoreListener):
             'max_attempts': task.max_attempts,
             'fault_code': task.fault_code,
             'fault_string': task.fault_string,
+        })
+
+    def bootstrap_refused(self, cpe_key: str, serial: str, source_ip: str) -> None:
+        self._emitter.emit(CPE_BOOTSTRAP_REFUSED, cpe_key, {
+            'cpe_key': cpe_key,
+            'serial': serial,
+            'source_ip': source_ip,
         })

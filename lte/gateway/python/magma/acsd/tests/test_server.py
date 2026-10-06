@@ -175,6 +175,109 @@ class ConcurrencyTest(CwmpListenerTest):
         self.assertEqual(errors, [])
 
 
+class SlowIdentityTest(CwmpListenerTest):
+    """The session handler (mobilityd, Redis) runs outside the spyne lock."""
+
+    def setUp(self):
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        calls = []
+
+        def identify(source_ip, inform):
+            calls.append(inform.DeviceId.SerialNumber)
+            if len(calls) == 1:
+                self.entered.set()
+                # A mobilityd RPC that takes its time.
+                self.release.wait(5)
+            return source_ip
+
+        self.identify = identify
+        super().setUp()
+
+    def test_slow_identity_does_not_block_other_cpes(self):
+        slow_reply = {}
+
+        def slow():
+            conn = self._conn()
+            slow_reply['resp'] = self._post(conn, _fixture('sim4000_inform.xml'))
+            conn.close()
+
+        thread = threading.Thread(target=slow)
+        thread.start()
+        self.assertTrue(self.entered.wait(5))
+        try:
+            conn = self._conn()
+            resp, body = self._post(conn, _fixture('synthetic_periodic_inform.xml'))
+            conn.close()
+            # Served while the first CPE's identity is still being resolved.
+            self.assertFalse(self.release.is_set())
+            self._assert_inform_response(resp, body, '42')
+        finally:
+            self.release.set()
+            thread.join(5)
+        # Each reply went to its own request.
+        self._assert_inform_response(*slow_reply['resp'], '1727697600000')
+
+
+class BodyLimitTest(unittest.TestCase):
+    LIMIT = 4096
+
+    def setUp(self):
+        self.server = make_cwmp_server(
+            CwmpBind('lo', '127.0.0.1', 0), CwmpSessionHandler(store=memory_store()),
+            workers=2, max_body=self.LIMIT,
+        )
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _raw(self, content_length):
+        sock = socket.create_connection(('127.0.0.1', self.server.server_address[1]), timeout=5)
+        # Headers only: a server that tried to read the body would hang.
+        sock.sendall((
+            'POST / HTTP/1.1\r\nHost: x\r\nContent-Type: text/xml\r\n'
+            'Content-Length: %s\r\n\r\n' % content_length
+        ).encode())
+        return sock
+
+    @staticmethod
+    def _read_until_closed(sock):
+        data = b''
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return data
+            data += chunk
+
+    def test_oversized_body_is_413_and_the_connection_closes(self):
+        sock = self._raw(10 * 1024 * 1024)
+        try:
+            data = self._read_until_closed(sock)
+        finally:
+            sock.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 413'), data)
+
+    def test_bad_content_length_is_400(self):
+        sock = self._raw('lots')
+        try:
+            data = self._read_until_closed(sock)
+        finally:
+            sock.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 400'), data)
+
+    def test_body_within_the_limit_is_served(self):
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_address[1], timeout=5)
+        try:
+            conn.request('POST', '/', _fixture('sim4000_inform.xml'), XML)
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 200)
+        finally:
+            conn.close()
+
+
 class RefusedSessionTest(CwmpListenerTest):
     @staticmethod
     def identify(source_ip, inform):

@@ -31,6 +31,7 @@ from magma.acsd.config import (
     CwmpBind,
     get_cwmp_auth,
     get_cwmp_bind,
+    get_cwmp_max_body,
     get_cwmp_wan,
     get_cwmp_workers,
     get_reach_config,
@@ -76,6 +77,14 @@ class CwmpWorkersTest(unittest.TestCase):
 
     def test_never_below_one(self):
         self.assertEqual(get_cwmp_workers({'cwmp_workers': 0}), 1)
+
+
+class CwmpMaxBodyTest(unittest.TestCase):
+    def test_default_is_one_mib(self):
+        self.assertEqual(get_cwmp_max_body({}), 1024 * 1024)
+
+    def test_from_yml(self):
+        self.assertEqual(get_cwmp_max_body({'cwmp_max_body_bytes': 4096}), 4096)
 
 
 class ReachConfigTest(unittest.TestCase):

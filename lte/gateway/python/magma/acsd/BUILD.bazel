@@ -150,7 +150,12 @@ py_library(
     name = "claims",
     srcs = ["claims.py"],
     visibility = ["//visibility:public"],
-    deps = ["//orc8r/gateway/python/magma/common/redis:containers"],
+    deps = [
+        ":credentials",
+        ":reach",
+        ":store",
+        "//orc8r/gateway/python/magma/common/redis:containers",
+    ],
 )
 
 py_library(
@@ -217,7 +222,9 @@ py_library(
     deps = [
         ":acsd_lib",
         ":reach",
+        requirement("netifaces"),
         requirement("requests"),
+        requirement("urllib3"),
     ],
 )
 
