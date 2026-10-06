@@ -220,4 +220,30 @@ describe('AcsAPI', () => {
       {type: 'reboot'},
     );
   });
+
+  it('searches the session log and sends Connection Requests', async () => {
+    const page = {total_count: 3, logs: []};
+    const get = jest.spyOn(axios, 'get').mockResolvedValue({data: page});
+    const post = jest
+      .spyOn(axios, 'post')
+      .mockResolvedValue({data: {sent: true}});
+    expect(
+      await AcsAPI.searchLogs('net1', {
+        event: 'cpe_session_completed',
+        cpe_key: 'IMSI1',
+        size: 100,
+      }),
+    ).toEqual(page);
+    expect(
+      get,
+    ).toHaveBeenCalledWith('/nms/apicontroller/magma/v1/acs/net1/logs', {
+      params: {event: 'cpe_session_completed', cpe_key: 'IMSI1', size: 100},
+    });
+    expect(await AcsAPI.connectionRequest('net1', 'CLAIM 1')).toEqual({
+      sent: true,
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/nms/apicontroller/magma/v1/acs/net1/cpes/CLAIM%201/connection_request',
+    );
+  });
 });
