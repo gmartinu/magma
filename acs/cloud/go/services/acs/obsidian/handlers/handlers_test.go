@@ -140,11 +140,15 @@ func keys(cpes []models.AcsCpe) []string {
 	return out
 }
 
+// informAt is the last Inform of the test CPEs: recent, so the CPE list
+// does not take them as stale.
+var informAt = time.Now().Truncate(time.Second).Add(-time.Minute)
+
 func titan(key, mode string, online bool) *cpestate.CpeView {
 	return &cpestate.CpeView{
 		CpeKey: key, Mode: mode, Imsi: key, SerialNumber: "SN-" + key, Oui: "00259E",
 		ProductClass: "Titan4000", SoftwareVersion: "1.2.3", Handler: "titan",
-		LastInform: 1700000000.5, InformsTotal: 7, Online: online, PendingTasks: 1,
+		LastInform: float64(informAt.Unix()) + 0.5, InformsTotal: 7, Online: online, PendingTasks: 1,
 		LastSession: &cpestate.CpeSession{SessionID: "s1", Result: "completed", Started: 1700000000, Ended: 1700000001, TasksDone: 2},
 		Model:       map[string]interface{}{"identity": map[string]interface{}{"model_name": "Titan 4000"}},
 	}
@@ -174,7 +178,7 @@ func TestListCpes(t *testing.T) {
 	assert.Equal(t, int32(1), got.PendingTasks)
 	assert.True(t, got.Online)
 	require.NotNil(t, got.LastInform)
-	assert.Equal(t, time.UnixMilli(1700000000500).UTC(), time.Time(*got.LastInform))
+	assert.Equal(t, informAt.Add(500*time.Millisecond).UTC(), time.Time(*got.LastInform))
 	require.NotNil(t, got.LastSession)
 	assert.Equal(t, "completed", got.LastSession.Result)
 	assert.Equal(t, int32(2), got.LastSession.TasksDone)
@@ -204,6 +208,32 @@ func TestListCpesStaleReportIsOffline(t *testing.T) {
 	assert.False(t, cpes[0].Online)
 }
 
+func TestListCpesHidesCpesSilentPastTheHorizon(t *testing.T) {
+	setupNetwork(t)
+	h := newHandlers(nil).WithStaleCpeAfter(24 * time.Hour)
+	now := time.Now()
+	fresh := titan("IMSI001010000000001", cpestate.ModeCore, true)
+	fresh.LastInform = float64(now.Add(-time.Hour).Unix())
+	gone := titan("IMSI001010000000002", cpestate.ModeCore, false)
+	gone.LastInform = float64(now.Add(-48 * time.Hour).Unix())
+	reportCpe(t, "hw1", fresh)
+	reportCpe(t, "hw1", gone)
+
+	assert.Equal(t, []string{"IMSI001010000000001"}, keys(listCpes(t, h, "")))
+	assert.Equal(t, []string{"IMSI001010000000001", "IMSI001010000000002"}, keys(listCpes(t, h, "?include_stale=true")))
+	assert.Equal(t, []string{"IMSI001010000000001"}, keys(listCpes(t, h, "?include_stale=false")))
+	rec := serve(t, h, http.MethodGet, CpesPath, "/magma/v1/acs/n1/cpes?include_stale=1", map[string]string{"network_id": "n1"}, "")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// The detail still answers for a stale CPE.
+	rec = serve(t, h, http.MethodGet, CpePath, "/magma/v1/acs/n1/cpes/IMSI001010000000002",
+		map[string]string{"network_id": "n1", "cpe_key": "IMSI001010000000002"}, "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// The default horizon is acsd's 7 days.
+	assert.Len(t, listCpes(t, newHandlers(nil).WithStaleCpeAfter(0), ""), 2)
+}
+
 func TestGetCpe(t *testing.T) {
 	setupNetwork(t)
 	h := newHandlers(nil)
@@ -229,9 +259,8 @@ func TestCpeReportedByTwoGatewaysIsServedByTheNewestInform(t *testing.T) {
 	setupNetwork(t)
 	h := newHandlers(nil)
 	moved := titan("IMSI001010000000001", cpestate.ModeCore, true)
-	moved.LastInform = 2000
 	old := titan("IMSI001010000000001", cpestate.ModeCore, false)
-	old.LastInform = 1000
+	old.LastInform = moved.LastInform - 3600
 	reportCpe(t, "hw2", moved)
 	reportCpe(t, "hw1", old) // reported last, as every minute
 
@@ -255,8 +284,9 @@ func TestCpeReportedByTwoGatewaysIsServedByTheNewestInform(t *testing.T) {
 func TestClaimIDOnTwoGatewaysIsFlagged(t *testing.T) {
 	setupNetwork(t)
 	h := newHandlers(nil)
-	a := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: 2000}
-	b := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: 1990}
+	inform := float64(informAt.Unix())
+	a := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: inform}
+	b := &cpestate.CpeView{CpeKey: "CLAIM7", Mode: cpestate.ModeClaimed, Online: true, LastInform: inform - 10}
 	reportCpe(t, "hw1", a)
 	reportCpe(t, "hw2", b)
 
